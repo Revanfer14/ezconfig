@@ -48,16 +48,40 @@ enum InitError: Error, CustomStringConvertible {
     }
 }
 
+enum StripError: Error, CustomStringConvertible {
+    case notInitialized
+
+    var description: String {
+        """
+        Project ini belum di-init — Configs/Base.xcconfig nggak ada.
+        `check --fix` nulis PRODUCT_BUNDLE_IDENTIFIER jadi $(BUNDLE_PREFIX),
+        variabel yang cuma hidup di Base.xcconfig. Tanpa itu project-nya rusak.
+        Jalanin dulu: ezconfig init
+        """
+    }
+}
+
+struct StripOutcome {
+    var teamsRemoved = 0
+    var provisioningRemoved = 0
+    var attributeTeamsRemoved = 0
+    var bundleIDsRewritten = 0
+    var touchedTargets: [String] = []
+
+    var isEmpty: Bool {
+        teamsRemoved == 0 && provisioningRemoved == 0
+            && attributeTeamsRemoved == 0 && bundleIDsRewritten == 0
+    }
+}
+
 struct InitOutcome {
     var targetName = ""
     var canonicalPrefix = ""
-    var teamsRemoved = 0
-    var targetAttributeTeamRemoved = false
-    var bundleIDsRewritten = 0
-    var provisioningRemoved = 0
+    var strip = StripOutcome()
     var linkedConfigurations: [String] = []
     var baseConfigPath = ""
     var localConfigExists = false
+    var hook = HookOutcome()
 }
 
 struct ProjectWriter {
@@ -109,11 +133,15 @@ struct ProjectWriter {
         }
 
         // 3. Strip identitas.
-        strip(target: target, into: &outcome)
+        stripProjectLevel(into: &outcome.strip)
+        stripTarget(target, into: &outcome.strip)
 
         // 4. Tulis balik.
         try xcodeproj.write(path: projectPath)
+        
+        outcome.hook = HookInstaller.install(sourceRoot: sourceRoot)
         outcome.localConfigExists = (configsDir + "Local.xcconfig").exists
+        
         return outcome
     }
 
@@ -180,41 +208,67 @@ struct ProjectWriter {
         "PROVISIONING_PROFILE",
     ]
 
-    private func strip(target: PBXNativeTarget, into outcome: inout InitOutcome) {
-        // a. Target level
-        for config in target.buildConfigurationList?.buildConfigurations ?? [] {
+    func runStrip() throws -> StripOutcome {
+        guard (sourceRoot + "Configs" + "Base.xcconfig").exists else {
+            throw StripError.notInitialized
+        }
+
+        var outcome = StripOutcome()
+        stripProjectLevel(into: &outcome)
+        for target in xcodeproj.pbxproj.nativeTargets.sorted(by: { $0.name < $1.name }) {
+            stripTarget(target, into: &outcome)
+        }
+
+        // Jangan nulis kalau nggak ada yang berubah — XcodeProj bakal
+        // nulis ulang seluruh file dan bikin diff palsu.
+        guard !outcome.isEmpty else { return outcome }
+
+        try xcodeproj.write(path: projectPath)
+        return outcome
+    }
+
+    private func stripProjectLevel(into outcome: inout StripOutcome) {
+        guard let project = xcodeproj.pbxproj.rootObject else { return }
+        for config in project.buildConfigurationList?.buildConfigurations ?? [] {
             removeKills(from: &config.buildSettings, into: &outcome)
+        }
+    }
+
+    private func stripTarget(_ target: PBXNativeTarget, into outcome: inout StripOutcome) {
+        var touched = false
+
+        for config in target.buildConfigurationList?.buildConfigurations ?? [] {
+            let before = outcome.teamsRemoved + outcome.provisioningRemoved
+            removeKills(from: &config.buildSettings, into: &outcome)
+            if outcome.teamsRemoved + outcome.provisioningRemoved > before { touched = true }
+
             if let value = config.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] as? String,
-               !value.contains("$(") {
+               !value.contains("$("), !value.contains("${") {
                 config.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] = "$(BUNDLE_PREFIX)"
                 outcome.bundleIDsRewritten += 1
+                touched = true
             }
         }
 
-        // b. Project level
-        if let project = xcodeproj.pbxproj.rootObject {
-            for config in project.buildConfigurationList?.buildConfigurations ?? [] {
-                removeKills(from: &config.buildSettings, into: &outcome)
-            }
-
-            // c. TargetAttributes
-            if var attrs = project.attributes(for: target),
-               attrs["DevelopmentTeam"] != nil {
-                attrs.removeValue(forKey: "DevelopmentTeam")
-                attrs.removeValue(forKey: "ProvisioningStyle")
-                project.setTargetAttributes(attrs, target: target)
-                outcome.targetAttributeTeamRemoved = true
-            }
+        if let project = xcodeproj.pbxproj.rootObject,
+           var attrs = project.attributes(for: target),
+           attrs["DevelopmentTeam"] != nil {
+            attrs.removeValue(forKey: "DevelopmentTeam")
+            attrs.removeValue(forKey: "ProvisioningStyle")
+            project.setTargetAttributes(attrs, target: target)
+            outcome.attributeTeamsRemoved += 1
+            touched = true
         }
+
+        if touched { outcome.touchedTargets.append(target.name) }
     }
 
     private func removeKills(
         from settings: inout [String: Any],
-        into outcome: inout InitOutcome
+        into outcome: inout StripOutcome
     ) {
         for key in settings.keys {
             // Tangkap juga varian berkondisi: DEVELOPMENT_TEAM[sdk=iphoneos*]
-            
             let base = key.split(separator: "[").first.map(String.init) ?? key
             guard Self.killKeys.contains(base) else { continue }
             settings.removeValue(forKey: key)

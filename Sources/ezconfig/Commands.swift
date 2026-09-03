@@ -77,9 +77,47 @@ extension Ezconfig {
         @Flag(name: .long, help: "Langsung strip dan git add ulang kalau kotor.")
         var fix = false
         
+        @Flag(name: .long, help: "Periksa staging area, bukan file di disk. Dipakai pre-commit hook.")
+        var staged = false
+        
         func run() throws {
-            print("ezconfig check — belum diimplementasi")
-            print("  fix: \(fix)")
+            let ctx = try CheckContext.resolve(path: options.path, staged: staged)
+
+            guard let text = ctx.text else { return }
+
+            let findings = PbxprojScanner.scan(text)
+
+            guard !findings.isEmpty else {
+                if !staged {
+                    print("✓ \(ctx.projectName) bersih (\(ctx.source.label)) — nggak ada identitas literal.")
+                }
+                return
+            }
+
+            guard fix else {
+                Report.printCheck(findings, projectName: ctx.projectName, source: ctx.source)
+                throw ExitCode.failure
+            }
+
+            let writer = try ProjectWriter(projectPath: ctx.projectPath)
+            let outcome = try writer.runStrip()
+            
+            let residue = PbxprojScanner.scan(try ctx.pbxprojPath.read())
+            guard residue.isEmpty else {
+                Report.printFixFailed(residue, projectName: ctx.projectName)
+                throw ExitCode.failure
+            }
+
+            guard staged else {
+                Report.printFixed(outcome, restaged: false)
+                return
+            }
+
+            if let repoPath = ctx.repoPath {
+                Git.add(repoPath, cwd: ctx.sourceRoot)
+            }
+            Report.printFixed(outcome, restaged: true)
+            throw ExitCode.failure
         }
     }
     

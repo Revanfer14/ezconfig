@@ -106,21 +106,21 @@ enum Report {
         out("▸ Stripping .pbxproj")
         var stripped = false
         
-        if o.teamsRemoved > 0 {
-            out("  \(pad("DEVELOPMENT_TEAM", 34))removed \(o.teamsRemoved) \(plural(o.teamsRemoved, "occurrence"))")
+        if o.strip.teamsRemoved > 0 {
+            out("  \(pad("DEVELOPMENT_TEAM", 34))removed \(o.strip.teamsRemoved) \(plural(o.strip.teamsRemoved, "occurrence"))")
             stripped = true
         }
-        if o.targetAttributeTeamRemoved {
+        if o.strip.attributeTeamsRemoved > 0 {
             out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed")
             stripped = true
         }
-        if o.provisioningRemoved > 0 {
-            out("  \(pad("PROVISIONING_PROFILE*", 34))removed \(o.provisioningRemoved) \(plural(o.provisioningRemoved, "occurrence"))")
+        if o.strip.provisioningRemoved > 0 {
+            out("  \(pad("PROVISIONING_PROFILE*", 34))removed \(o.strip.provisioningRemoved) \(plural(o.strip.provisioningRemoved, "occurrence"))")
             stripped = true
         }
-        if o.bundleIDsRewritten > 0 {
+        if o.strip.bundleIDsRewritten > 0 {
             out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ $(BUNDLE_PREFIX)  "
-                + "(\(o.bundleIDsRewritten) \(plural(o.bundleIDsRewritten, "configuration")))")
+                + "(\(o.strip.bundleIDsRewritten) \(plural(o.strip.bundleIDsRewritten, "configuration")))")
             stripped = true
         }
         if !stripped {
@@ -137,6 +137,18 @@ enum Report {
         }
         out("")
         
+        // Hook commit
+        let h = o.hook
+        out("▸ Pre-commit hook")
+        switch h.action {
+        case .created:   out("  Dipasang       \(h.path)")
+        case .appended:  out("  Ditambahin ke hook yang udah ada")
+        case .updated:   out("  Diperbarui     \(h.path)")
+        case .unchanged: out("  Udah terpasang")
+        case .skipped:   out("  ⚠︎  Nggak dipasang — \(h.reason ?? "alasan nggak diketahui")")
+        }
+        out("")
+        
         // Closing
         out(rule)
         if o.localConfigExists {
@@ -147,7 +159,7 @@ enum Report {
             out("  Configs/Local.xcconfig ada.")
         }
         out("")
-    }   
+    }
     
     private static func plural(_ n: Int, _ word: String) -> String {
         n == 1 ? word : word + "s"
@@ -182,11 +194,29 @@ enum Report {
             }
             out("")
         }
-
+        
+        let h = o.hook
+        out("▸ Pre-commit hook")
+        switch h.action {
+        case .created:   out("  Dipasang       \(h.path)")
+        case .appended:  out("  Ditambahin ke hook yang udah ada")
+            out("                 \(h.path)")
+        case .updated:   out("  Diperbarui     \(h.path)")
+        case .unchanged: out("  Udah terpasang \(h.path)")
+        case .skipped:   out("  ⚠︎  Nggak dipasang — \(h.reason ?? "alasan nggak diketahui")")
+        }
+        if let custom = h.customHooksPath {
+            out("  core.hooksPath \(custom)")
+        }
+        if h.projectDir != "." {
+            out("  Project dir    \(h.projectDir)")
+        }
+        out("")
+        
         out(rule)
-
+        
         var warned = false
-
+        
         if g.localTracked {
             out("  ⚠︎  Configs/Local.xcconfig UDAH KE-COMMIT di repo ini.")
             out("     Selama masih tracked, .gitignore nggak ngefek —")
@@ -197,7 +227,7 @@ enum Report {
             out("")
             warned = true
         }
-
+        
         if g.baseIgnored {
             out("  ⚠︎  Configs/Base.xcconfig KE-IGNORE dan nggak bisa dibatalin")
             out("     lewat negasi — kemungkinan folder induknya yang di-exclude.")
@@ -209,7 +239,7 @@ enum Report {
             out("")
             warned = true
         }
-
+        
         if !warned {
             out("  Local.xcconfig siap dan ke-ignore. Buka project dan build.")
         }

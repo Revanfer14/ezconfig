@@ -42,12 +42,12 @@ struct SetupOutcome {
     var previousTeamID: String?
     var previews: [(target: String, config: String, bundleID: String)] = []
     var git = GitOutcome()
+    var hook = HookOutcome()
 }
 
 enum LocalConfig {
 
     // Team ID → suffix bundle ID. Deterministik, huruf kecil semua.
-
     static func suffix(for teamID: String) throws -> String {
         let cleaned = teamID.lowercased().filter { $0.isLetter || $0.isNumber }
         guard let first = cleaned.first else {
@@ -132,6 +132,7 @@ enum LocalConfig {
         }
 
         outcome.git = Gitignore.ensure(sourceRoot: sourceRoot)
+        outcome.hook = HookInstaller.install(sourceRoot: sourceRoot)
         return outcome
     }
 }
