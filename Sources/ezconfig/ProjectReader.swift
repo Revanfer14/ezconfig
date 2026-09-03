@@ -84,17 +84,23 @@ enum ProjectReader {
                         team: resolve("DEVELOPMENT_TEAM",
                                       target: targetSettings, project: fallback),
                         baseConfigFile: config.baseConfiguration?.name
-                        ?? config.baseConfiguration?.path
+                        ?? config.baseConfiguration?.path,
+                        sdkroot: resolve("SDKROOT",
+                                         target: targetSettings, project: fallback)?.value
                     )
                 )
             }
+            
+            let sortedConfigs = configs.sorted { $0.name < $1.name }
+            let sdkroot = sortedConfigs.compactMap(\.sdkroot).first
             
             targets.append(
                 TargetInfo(
                     name: target.name,
                     productType: label(target.productType?.rawValue),
+                    platform: Platform(sdkroot: sdkroot),
                     attributeTeam: attributeTeam,
-                    configs: configs.sorted { $0.name < $1.name }
+                    configs: sortedConfigs
                 )
             )
         }

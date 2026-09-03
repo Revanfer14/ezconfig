@@ -25,7 +25,7 @@ enum Report {
         }
 
         for target in signable {
-            out("  \(target.name)  [\(target.productType)]")
+            out("  \(target.name)  [\(target.displayType)]")
 
             for config in target.configs {
                 out("    \(pad(config.name, 10))"
