@@ -53,9 +53,16 @@ extension Ezconfig {
         var team: String?
         
         func run() throws {
-            print("ezconfig setup — belum diimplementasi")
-            print("  path: \(options.path)")
-            print("  team: \(team ?? "auto-detect")")
+            let projectPath = try ProjectReader.locate(in: options.path)
+            let sourceRoot = Path(projectPath).parent()
+            
+            let identity = try Keychain.resolve(override: team)
+            let outcome = try LocalConfig.run(
+                sourceRoot: sourceRoot,
+                projectPath: projectPath,
+                identity: identity
+            )
+            Report.printSetup(outcome)
         }
     }
     
