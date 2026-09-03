@@ -74,4 +74,82 @@ enum Report {
     private static func pad(_ s: String, _ width: Int) -> String {
         s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
     }
+    
+    static func printInit(_ o: InitOutcome, projectName: String, dryRun: Bool) {
+            let out: (String) -> Void = { Swift.print($0) }
+            let rule = String(repeating: "─", count: 50)
+
+            out("")
+            out("ezconfig \(Ezconfig.configuration.version)")
+            out("")
+            out("▸ \(projectName)")
+            out("  \(pad("Target", 20))\(o.targetName)")
+            out("  \(pad("Canonical prefix", 20))\(o.canonicalPrefix)")
+            out("")
+
+            // Dry run: tampilkan rencana, bukan hasil
+            if dryRun {
+                out("▸ Dry run — nggak ada file yang ditulis")
+                out("  bikin        \(o.baseConfigPath)")
+                out("  sambungin    ke semua konfigurasi target")
+                out("  strip        DEVELOPMENT_TEAM, PROVISIONING_PROFILE*,")
+                out("               TargetAttributes.DevelopmentTeam")
+                out("  tulis ulang  PRODUCT_BUNDLE_IDENTIFIER → $(BUNDLE_PREFIX)")
+                out("")
+                out(rule)
+                out("  Jalanin tanpa --dry-run buat eksekusi.")
+                out("")
+                return
+            }
+
+            // Strip
+            out("▸ Stripping .pbxproj")
+            var stripped = false
+
+            if o.teamsRemoved > 0 {
+                out("  \(pad("DEVELOPMENT_TEAM", 34))removed \(o.teamsRemoved) \(plural(o.teamsRemoved, "occurrence"))")
+                stripped = true
+            }
+            if o.targetAttributeTeamRemoved {
+                out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed")
+                stripped = true
+            }
+            if o.provisioningRemoved > 0 {
+                out("  \(pad("PROVISIONING_PROFILE*", 34))removed \(o.provisioningRemoved) \(plural(o.provisioningRemoved, "occurrence"))")
+                stripped = true
+            }
+            if o.bundleIDsRewritten > 0 {
+                out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ $(BUNDLE_PREFIX)  "
+                    + "(\(o.bundleIDsRewritten) \(plural(o.bundleIDsRewritten, "configuration")))")
+                stripped = true
+            }
+            if !stripped {
+                out("  Nggak ada identitas literal — .pbxproj emang udah bersih.")
+            }
+            out("")
+
+            // Tulis & connect
+            out("▸ Writing \(o.baseConfigPath)")
+            if o.linkedConfigurations.isEmpty {
+                out("▸ Nggak ada konfigurasi yang ke-link — periksa manual.")
+            } else {
+                out("▸ Linking to \(o.linkedConfigurations.joined(separator: ", "))")
+            }
+            out("")
+
+            // Closing
+            out(rule)
+            if o.localConfigExists {
+                out("  .pbxproj bersih. Configs/Local.xcconfig kedeteksi —")
+                out("  buka project dan build buat verifikasi.")
+            } else {
+                out("  .pbxproj bersih. Belum bisa build sampai")
+                out("  Configs/Local.xcconfig ada.")
+            }
+            out("")
+        }
+
+        private static func plural(_ n: Int, _ word: String) -> String {
+            n == 1 ? word : word + "s"
+        }
 }

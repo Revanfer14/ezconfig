@@ -7,6 +7,7 @@
 
 import ArgumentParser
 import Foundation
+import PathKit
 
 struct ProjectOptions: ParsableArguments {
     @Option(name: .long, help: "Path ke folder project. Default: folder sekarang.")
@@ -15,17 +16,28 @@ struct ProjectOptions: ParsableArguments {
 
 extension Ezconfig {
     
-    struct Init: ParsableCommand {
+    struct InitCommand: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "init",
             abstract: "Extract signing identity from .pbxproj and create Base.xcconfig."
         )
         
-        @OptionGroup var options: ProjectOptions
+        @Option(name: .long, help: "Paksa prefix bundle ID kanonik.")
+        var prefix: String?
+        
+        @Flag(name: .long, help: "Cuma tampilkan rencana, jangan nulis apa-apa.")
+        var dryRun = false
         
         func run() throws {
-            print("ezconfig init — belum diimplementasi")
-            print("  path: \(options.path)")
+            let cwd = Path.current
+            guard let projectPath = cwd.glob("*.xcodeproj").first else {
+                throw ValidationError("Nggak nemu .xcodeproj di \(cwd). Pindah ke root project dulu.")
+            }
+            
+            let writer = try ProjectWriter(projectPath: projectPath)
+            let outcome = try writer.runInit(overridePrefix: prefix, dryRun: dryRun)
+            
+            Report.printInit(outcome, projectName: projectPath.lastComponent, dryRun: dryRun)
         }
     }
     

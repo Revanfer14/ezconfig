@@ -14,7 +14,7 @@ struct Ezconfig: ParsableCommand {
         commandName: "ezconfig",
         abstract: "Automate multi-developer (with Individual Apple Membership Program) code signing for Xcode projects",
         version: "0.1.0",
-        subcommands: [Init.self, Setup.self, Check.self, Clean.self, Inspect.self],
+        subcommands: [InitCommand.self, Setup.self, Check.self, Clean.self, Inspect.self],
     )
         
 }
