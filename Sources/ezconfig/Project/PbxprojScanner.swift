@@ -15,9 +15,14 @@ struct Finding {
         case bundleID              = "PRODUCT_BUNDLE_IDENTIFIER"
         case provisioningSpecifier = "PROVISIONING_PROFILE_SPECIFIER"
         case provisioningProfile   = "PROVISIONING_PROFILE"
+        case companionBundleID     = "INFOPLIST_KEY_WKCompanionAppBundleIdentifier"
 
         var label: String {
-            self == .attributeTeam ? "TargetAttributes.DevelopmentTeam" : rawValue
+            switch self {
+            case .attributeTeam:     return "TargetAttributes.DevelopmentTeam"
+            case .companionBundleID: return "WKCompanionAppBundleIdentifier"
+            default:                 return rawValue
+            }
         }
     }
 

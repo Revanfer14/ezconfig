@@ -15,6 +15,44 @@ private struct StdErr: TextOutputStream {
 
 extension Report {
     
+    static func printTolerated(_ findings: [Finding], toStdout: Bool) {
+        guard !findings.isEmpty else { return }
+        var err = StdErr()
+        let emit: (String) -> Void = { line in
+            if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
+        }
+
+        emit("")
+        emit("  \(findings.count) nilai literal dibiarin (target di luar prefix):")
+        for f in findings {
+            emit("    line \(f.line)  \(f.key.label)  \(f.value)")
+        }
+        emit("  Ini bukan kebocoran — target itu emang nggak diadopsi ezconfig.")
+        emit("  Kalau mau ikut diadopsi: samain bundle ID-nya di Xcode, lalu ezconfig init.")
+    }
+
+    static func printAudit(_ audit: ConfigAudit, toStdout: Bool) {
+        guard !audit.isClean, audit.baseExists else { return }
+        var err = StdErr()
+        let emit: (String) -> Void = { line in
+            if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
+        }
+
+        emit("")
+        emit("  ⚠︎  Variabel dipakai di entitlements tapi nggak ada di Base.xcconfig:")
+        for u in audit.undefined {
+            emit("     \(u.file)  →  $(\(u.variable))")
+        }
+        emit("     Nilainya bakal kosong waktu build. Jalanin: ezconfig init")
+    }
+
+    static func printFixTolerated(_ findings: [Finding]) {
+        guard !findings.isEmpty else { return }
+        var err = StdErr()
+        Swift.print("", to: &err)
+        Swift.print("  \(findings.count) nilai dibiarin apa adanya (target di luar prefix) — commit lanjut.", to: &err)
+    }
+    
     static func printFixed(_ o: StripOutcome, restaged: Bool) {
         var err = StdErr()
 

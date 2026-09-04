@@ -71,7 +71,7 @@ enum Report {
         return "\(pad(key, 10)) \(mark) \(v.value)\(origin)"
     }
     
-    private static func pad(_ s: String, _ width: Int) -> String {
+    static func pad(_ s: String, _ width: Int) -> String {
         s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
     }
     
@@ -83,18 +83,33 @@ enum Report {
         out("ezconfig \(Ezconfig.configuration.version)")
         out("")
         out("▸ \(projectName)")
-        out("  \(pad("Target", 20))\(o.targetName)")
-        out("  \(pad("Canonical prefix", 20))\(o.canonicalPrefix)")
+        out("  \(pad("Prefix kanonik", 20))\(o.canonicalPrefix)")
+        out("  \(pad("Sumber prefix", 20))\(o.prefixOrigin)")
         out("")
         
-        // Dry run: tampilkan rencana, bukan hasil
+        // Target
+        let width = (o.adopted.map(\.target.count) + o.skipped.map(\.target.count))
+            .max() ?? 0
+        
+        out("▸ Target")
+        for a in o.adopted {
+            out("  ✓ \(pad(a.target, width))  \(a.template)")
+        }
+        for s in o.skipped {
+            out("  ✗ \(pad(s.target, width))  DILEWATIN — \(s.reason)")
+            if let b = s.bundleID {
+                out("    \(pad("", width))  bundle ID tetap literal: \(b)")
+            }
+        }
+        out("")
+        
         if dryRun {
             out("▸ Dry run — nggak ada file yang ditulis")
             out("  bikin        \(o.baseConfigPath)")
-            out("  sambungin    ke semua konfigurasi target")
+            out("  sambungin    ke tiap konfigurasi target di atas")
             out("  strip        DEVELOPMENT_TEAM, PROVISIONING_PROFILE*,")
             out("               TargetAttributes.DevelopmentTeam")
-            out("  tulis ulang  PRODUCT_BUNDLE_IDENTIFIER → $(BUNDLE_PREFIX)")
+            out("  tulis ulang  PRODUCT_BUNDLE_IDENTIFIER → template per target")
             out("")
             out(rule)
             out("  Jalanin tanpa --dry-run buat eksekusi.")
@@ -111,7 +126,7 @@ enum Report {
             stripped = true
         }
         if o.strip.attributeTeamsRemoved > 0 {
-            out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed")
+            out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed \(o.strip.attributeTeamsRemoved) \(plural(o.strip.attributeTeamsRemoved, "target"))")
             stripped = true
         }
         if o.strip.provisioningRemoved > 0 {
@@ -119,8 +134,13 @@ enum Report {
             stripped = true
         }
         if o.strip.bundleIDsRewritten > 0 {
-            out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ $(BUNDLE_PREFIX)  "
+            out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ variabel  "
                 + "(\(o.strip.bundleIDsRewritten) \(plural(o.strip.bundleIDsRewritten, "configuration")))")
+            stripped = true
+        }
+        if o.strip.companionsRewritten > 0 {
+            out("  \(pad("INFOPLIST_KEY_WKCompanion*", 34))→ variabel  "
+                + "(\(o.strip.companionsRewritten) \(plural(o.strip.companionsRewritten, "configuration")))")
             stripped = true
         }
         if !stripped {
@@ -128,14 +148,65 @@ enum Report {
         }
         out("")
         
-        // Tulis & connect
         out("▸ Writing \(o.baseConfigPath)")
-        if o.linkedConfigurations.isEmpty {
-            out("▸ Nggak ada konfigurasi yang ke-link — periksa manual.")
-        } else {
-            out("▸ Linking to \(o.linkedConfigurations.joined(separator: ", "))")
-        }
+        let linked = o.adopted.reduce(0) { $0 + $1.configs.count }
+        out("▸ Linking ke \(o.adopted.count) target (\(linked) konfigurasi)")
         out("")
+        
+        if !o.companionEdits.isEmpty {
+            out("▸ Companion reference")
+            for c in o.companionEdits {
+                out("  \(c.target)  [\(c.site)]")
+                out("    \(c.from) → \(c.to)")
+            }
+            out("")
+        }
+        
+        if !o.appGroups.isEmpty {
+            out("▸ App Group")
+            for g in o.appGroups {
+                out("  \(pad(g.variable, 18))\(g.canonical)$(LOCAL_SUFFIX)")
+            }
+            out("")
+        }
+
+        if !o.entitlementEdits.isEmpty {
+            out("▸ Entitlements")
+            for e in o.entitlementEdits {
+                var parts: [String] = []
+                if e.appGroups > 0 { parts.append("\(e.appGroups) app group") }
+                if e.keychains > 0 { parts.append("\(e.keychains) keychain group") }
+                out("  \(e.path)")
+                out("    \(parts.joined(separator: ", ")) → variabel")
+            }
+            out("")
+        }
+
+        if !o.plistEdits.isEmpty {
+            out("▸ Info.plist")
+            for p in o.plistEdits {
+                out("  \(p.path)  \(p.count) \(plural(p.count, "nilai")) ditulis ulang")
+            }
+            out("")
+        }
+
+        if !o.companionUnresolved.isEmpty || !o.plistFailures.isEmpty || !o.entitlementFailures.isEmpty {
+            out("▸ Belum ditangani")
+            for c in o.companionUnresolved {
+                out("  \(c.target)  [\(c.site)]")
+                out("    \(c.from) — di luar prefix, dilewatin")
+            }
+            for p in o.plistFailures {
+                out("  \(p)")
+                out("    gagal dibaca/ditulis — periksa manual")
+            }
+            
+            for e in o.entitlementFailures {
+                out("  \(e.path)")
+                out("    \(e.reason)")
+            }
+            out("")
+        }
         
         // Hook commit
         let h = o.hook
@@ -151,12 +222,32 @@ enum Report {
         
         // Closing
         out(rule)
+        if !o.skipped.isEmpty {
+            out("  ⚠︎  \(o.skipped.count) target dilewatin — bundle ID-nya masih literal,")
+            out("     jadi `check` bakal terus nolak commit. Samain bundle ID-nya")
+            out("     di Xcode, atau tentuin prefix manual: ezconfig init --prefix <id>")
+            out("")
+        }
+        
+        if !o.hardcodedGroups.isEmpty {
+            out("  ⚠︎  App Group masih ditulis literal di kode:")
+            for h in o.hardcodedGroups {
+                out("     \(h.group)")
+                for f in h.files { out("       \(f)") }
+            }
+            out("     Build setting nggak nyentuh string di Swift. Di Debug,")
+            out("     App Group aslinya bakal dapet suffix — kode yang masih")
+            out("     nunjuk string lama bakal gagal buka container.")
+            out("     Ganti jadi baca dari Info.plist, atau pakai satu konstanta.")
+            out("")
+        }
+        
         if o.localConfigExists {
             out("  .pbxproj bersih. Configs/Local.xcconfig kedeteksi —")
             out("  buka project dan build buat verifikasi.")
         } else {
-            out("  .pbxproj bersih. Belum bisa build sampai")
-            out("  Configs/Local.xcconfig ada.")
+            out("  .pbxproj bersih. Jalanin `ezconfig setup` dulu")
+            out("  sebelum build — Configs/Local.xcconfig belum ada.")
         }
         out("")
     }
@@ -179,6 +270,14 @@ enum Report {
             out("  \(pad("Sebelumnya", 18))\(prev)  → diganti")
         }
         out("")
+        
+        if !o.appGroupPreviews.isEmpty {
+            out("▸ App Group")
+            for p in o.appGroupPreviews {
+                out("  \(pad(p.config, 10))\(p.value)")
+            }
+            out("")
+        }
         
         let g = o.git
         if !g.isRepo {

@@ -43,6 +43,7 @@ struct SetupOutcome {
     var previews: [(target: String, config: String, bundleID: String)] = []
     var git = GitOutcome()
     var hook = HookOutcome()
+    var appGroupPreviews: [(config: String, value: String)] = []
 }
 
 enum LocalConfig {
@@ -130,7 +131,11 @@ enum LocalConfig {
                 ))
             }
         }
-
+        for g in BaseConfig.appGroups(from: basePath) {
+            outcome.appGroupPreviews.append((config: "Debug", value: g.canonical + sfx))
+            outcome.appGroupPreviews.append((config: "Release", value: g.canonical))
+        }
+        
         outcome.git = Gitignore.ensure(sourceRoot: sourceRoot)
         outcome.hook = HookInstaller.install(sourceRoot: sourceRoot)
         return outcome

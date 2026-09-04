@@ -71,45 +71,64 @@ extension Ezconfig {
             commandName: "check",
             abstract: "Check if .pbxproj is clean of signing identity."
         )
-        
+
         @OptionGroup var options: ProjectOptions
-        
+
         @Flag(name: .long, help: "Langsung strip dan git add ulang kalau kotor.")
         var fix = false
-        
+
         @Flag(name: .long, help: "Periksa staging area, bukan file di disk. Dipakai pre-commit hook.")
         var staged = false
-        
+
+        @Flag(name: .long, help: "Tolak juga nilai literal di target yang nggak diadopsi.")
+        var strict = false
+
         func run() throws {
             let ctx = try CheckContext.resolve(path: options.path, staged: staged)
-
             guard let text = ctx.text else { return }
 
-            let findings = PbxprojScanner.scan(text)
+            let allow = strict ? [] : CheckPolicy.allowlist(projectPath: ctx.projectPath.string)
+            let split = CheckPolicy.split(PbxprojScanner.scan(text), allowlist: allow)
+            let audit = ConfigAudit.run(
+                sourceRoot: ctx.sourceRoot,
+                projectPath: ctx.projectPath.string
+            )
 
-            guard !findings.isEmpty else {
+            // Bersih dari yang wajib dibersihin.
+            guard !split.blocking.isEmpty else {
                 if !staged {
                     print("✓ \(ctx.projectName) bersih (\(ctx.source.label)) — nggak ada identitas literal.")
+                    Report.printTolerated(split.tolerated, toStdout: true)
+                    Report.printAudit(audit, toStdout: true)
+                } else {
+                    Report.printAudit(audit, toStdout: false)
                 }
                 return
             }
 
             guard fix else {
-                Report.printCheck(findings, projectName: ctx.projectName, source: ctx.source)
+                Report.printCheck(split.blocking, projectName: ctx.projectName, source: ctx.source)
+                Report.printTolerated(split.tolerated, toStdout: false)
                 throw ExitCode.failure
             }
 
             let writer = try ProjectWriter(projectPath: ctx.projectPath)
             let outcome = try writer.runStrip()
-            
-            let residue = PbxprojScanner.scan(try ctx.pbxprojPath.read())
-            guard residue.isEmpty else {
-                Report.printFixFailed(residue, projectName: ctx.projectName)
+
+            // Residu diklasifikasi ulang. Yang ditoleransi bukan kegagalan —
+            // tanpa ini, repo dengan target di luar prefix nggak bisa commit selamanya.
+            let residue = CheckPolicy.split(
+                PbxprojScanner.scan(try ctx.pbxprojPath.read()),
+                allowlist: allow
+            )
+            guard residue.blocking.isEmpty else {
+                Report.printFixFailed(residue.blocking, projectName: ctx.projectName)
                 throw ExitCode.failure
             }
 
             guard staged else {
                 Report.printFixed(outcome, restaged: false)
+                Report.printFixTolerated(residue.tolerated)
                 return
             }
 
@@ -117,6 +136,7 @@ extension Ezconfig {
                 Git.add(repoPath, cwd: ctx.sourceRoot)
             }
             Report.printFixed(outcome, restaged: true)
+            Report.printFixTolerated(residue.tolerated)
             throw ExitCode.failure
         }
     }
@@ -146,6 +166,16 @@ extension Ezconfig {
             let path = try ProjectReader.locate(in: options.path)
             let info = try ProjectReader.read(path)
             Report.print(info)
+            
+            do {
+                let plan = try AdoptionPlan.make(info: info)
+                Report.printPlan(plan)
+            } catch {
+                print("▸ Rencana adopsi")
+                print("  Nggak bisa disusun:")
+                print("  \(error)")
+                print("")
+            }
         }
     }
 }

@@ -86,7 +86,16 @@ enum ProjectReader {
                         baseConfigFile: config.baseConfiguration?.name
                         ?? config.baseConfiguration?.path,
                         sdkroot: resolve("SDKROOT",
-                                         target: targetSettings, project: fallback)?.value
+                                         target: targetSettings, project: fallback)?.value,
+                        entitlements: resolve("CODE_SIGN_ENTITLEMENTS",
+                                              target: targetSettings, project: fallback),
+                        companionBundleID: resolve("INFOPLIST_KEY_WKCompanionAppBundleIdentifier",
+                                                   target: targetSettings, project: fallback),
+                        infoPlistFile: resolve("INFOPLIST_FILE",
+                                               target: targetSettings, project: fallback),
+                        generatesInfoPlist: resolve("GENERATE_INFOPLIST_FILE",
+                                                    target: targetSettings, project: fallback)?
+                            .value.uppercased() == "YES"
                     )
                 )
             }
@@ -98,6 +107,7 @@ enum ProjectReader {
                 TargetInfo(
                     name: target.name,
                     productType: label(target.productType?.rawValue),
+                    rawProductType: target.productType?.rawValue ?? "",
                     platform: Platform(sdkroot: sdkroot),
                     attributeTeam: attributeTeam,
                     configs: sortedConfigs

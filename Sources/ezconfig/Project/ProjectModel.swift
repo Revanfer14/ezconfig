@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import PathKit
 
 enum Platform: String {
     case iOS
@@ -40,6 +41,8 @@ struct SettingValue {
     var isVariable: Bool {
         value.contains("$(") || value.contains("${")
     }
+    
+    
 }
 
 struct ConfigInfo {
@@ -48,11 +51,17 @@ struct ConfigInfo {
     let team: SettingValue?
     let baseConfigFile: String?   // .xcconfig yang udah ke-link
     let sdkroot: String? // Tipe target
+    
+    let entitlements: SettingValue?       // CODE_SIGN_ENTITLEMENTS
+    let companionBundleID: SettingValue?  // INFOPLIST_KEY_WKCompanionAppBundleIdentifier
+    let infoPlistFile: SettingValue?      // INFOPLIST_FILE (project lama)
+    let generatesInfoPlist: Bool          // GENERATE_INFOPLIST_FILE == YES
 }
 
 struct TargetInfo {
     let name: String
     let productType: String
+    let rawProductType: String
     let platform: Platform
     
     // DEVELOPMENT_TEAM yang nyempil di attributes
@@ -62,6 +71,30 @@ struct TargetInfo {
     // Target yang punya bundle ID di config mana pun = target yang perlu diadopsi.
     var isSignable: Bool {
         configs.contains { $0.bundleID != nil }
+    }
+    
+    var isApp: Bool {
+        rawProductType == "com.apple.product-type.application"
+    }
+    
+    var entitlementPaths: [String] {
+        var seen: [String] = []
+        for c in configs {
+            guard let p = c.entitlements?.value, !seen.contains(p) else { continue }
+            seen.append(p)
+        }
+        return seen
+    }
+    
+    var literalCompanion: String? {
+        configs.compactMap(\.companionBundleID)
+            .first { !$0.isVariable }?.value
+    }
+    
+    var legacyInfoPlist: String? {
+        guard let c = configs.first(where: { !$0.generatesInfoPlist }),
+              let p = c.infoPlistFile?.value else { return nil }
+        return p
     }
     
     var displayType: String {
@@ -81,6 +114,10 @@ struct ProjectInfo {
     let path: String
     let name: String
     let targets: [TargetInfo]
+    
+    var sourceRoot: String {
+        (path as NSString).deletingLastPathComponent
+    }
     
     var literalFindings: [(target: String, config: String, key: String, value: String)] {
         var out: [(String, String, String, String)] = []

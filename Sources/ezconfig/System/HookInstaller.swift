@@ -16,7 +16,7 @@ struct HookOutcome {
         case unchanged    // blok ezconfig udah ada dan identik
         case skipped      // nggak dipasang, lihat `reason`
     }
-
+    
     var action: Action = .skipped
     var path = ""
     var reason: String?
@@ -25,40 +25,42 @@ struct HookOutcome {
 }
 
 enum HookInstaller {
-
+    
     private static let begin = "# >>> ezconfig >>>"
     private static let end   = "# <<< ezconfig <<<"
-
+    
     // Blok yang disisipin ke pre-commit
     private static func block(projectDir: String) -> String {
         """
         \(begin)
         # Jangan diedit tangan — blok ini ditulis ulang tiap `ezconfig setup`.
         # GUI client (Xcode, GitHub Desktop) jalan tanpa /opt/homebrew/bin di PATH.
+        # ezconfig 0.5 — nilai literal di target yang nggak diadopsi nggak diblokir.
         PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
         if command -v ezconfig >/dev/null 2>&1; then
             ( cd "\(projectDir)" && ezconfig check --fix --staged ) || exit 1
         else
-            echo "ezconfig: nggak keinstall — pemeriksaan signing dilewatin." >&2
-            echo "  brew install revan/adac9/ezconfig" >&2
+            echo "ezconfig: BINARY NGGAK KETEMU — commit ini LOLOS TANPA PEMERIKSAAN." >&2
+            echo "  Identitas signing bisa ikut ke-commit tanpa ketauan." >&2
+            echo "  Pasang: brew install revan/adac9/ezconfig" >&2
         fi
         \(end)
         """
     }
-
+    
     static func install(sourceRoot: Path) -> HookOutcome {
         var outcome = HookOutcome()
-
+        
         guard Git.repoRoot(sourceRoot) != nil else {
             outcome.reason = "bukan git repo"
             return outcome
         }
-
+        
         // Folder project relatif repo root: "apps/ios" atau "." kalau di root.
         let prefix = (Git.prefix(sourceRoot) ?? "")
             .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         outcome.projectDir = prefix.isEmpty ? "." : prefix
-
+        
         let hooksDir: Path
         if let custom = Git.hooksPath(sourceRoot) {
             hooksDir = custom
@@ -70,25 +72,25 @@ enum HookInstaller {
             }
             hooksDir = gitDir + "hooks"
         }
-
+        
         let hookPath = hooksDir + "pre-commit"
         outcome.path = hookPath.string
-
+        
         let body = block(projectDir: outcome.projectDir)
-
+        
         do {
             try FileManager.default.createDirectory(
                 atPath: hooksDir.string, withIntermediateDirectories: true
             )
-
+            
             if !hookPath.exists {
                 try write("#!/bin/sh\n\n" + body + "\n", to: hookPath)
                 outcome.action = .created
                 return outcome
             }
-
+            
             let existing: String = try hookPath.read()
-
+            
             if existing.contains(begin) {
                 let replaced = replaceBlock(in: existing, with: body)
                 if replaced == existing {
@@ -99,7 +101,7 @@ enum HookInstaller {
                 }
                 return outcome
             }
-
+            
             // Hook orang lain. Cuma aman di-append kalau dia shell script.
             guard let shebang = existing.split(separator: "\n").first,
                   shebang.hasPrefix("#!"),
@@ -108,27 +110,27 @@ enum HookInstaller {
                 outcome.reason = "pre-commit yang ada bukan shell script"
                 return outcome
             }
-
+            
             var merged = existing
             if !merged.hasSuffix("\n") { merged += "\n" }
             merged += "\n" + body + "\n"
             try write(merged, to: hookPath)
             outcome.action = .appended
             return outcome
-
+            
         } catch {
             outcome.reason = "\(error)"
             return outcome
         }
     }
-
+    
     private static func replaceBlock(in text: String, with body: String) -> String {
         guard let b = text.range(of: begin),
               let e = text.range(of: end, range: b.upperBound..<text.endIndex)
         else { return text }
         return text.replacingCharacters(in: b.lowerBound..<e.upperBound, with: body)
     }
-
+    
     private static func write(_ text: String, to path: Path) throws {
         try text.write(toFile: path.string, atomically: true, encoding: .utf8)
         
