@@ -129,6 +129,29 @@ extension Report {
         Swift.print("  Fix: ezconfig check --fix", to: &err)
         Swift.print("", to: &err)
     }
+    
+    static func printUnfixable(_ findings: [Finding], toStdout: Bool) {
+        guard !findings.isEmpty else { return }
+        var err = StdErr()
+        let emit: (String) -> Void = { line in
+            if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
+        }
+
+        emit("")
+        emit("  ⚠︎  \(findings.count) nilai ngandung komponen yang bentuknya kayak suffix lokal:")
+        for f in findings {
+            emit("     line \(f.line)  \(f.key.label)  \(f.value)")
+        }
+        emit("")
+        emit("     Komponennya nggak nempel di belakang prefix, jadi ezconfig nggak")
+        emit("     bisa mastiin itu suntikan Xcode atau emang bagian nama target.")
+        emit("     Sesuai prinsipnya, ezconfig nggak nebak: commit ini DILANJUT.")
+        emit("")
+        emit("     Kalau itu beneran identitas lo, dia ikut ke Release juga, dan")
+        emit("     App ID-nya bisa ke-claim di App Store Connect atas nama lo.")
+        emit("     Benerin bundle ID-nya di Xcode, atau tentuin prefix manual:")
+        emit("       ezconfig init --prefix <id>")
+    }
 
     private static func padRight(_ s: String, _ w: Int) -> String {
         s.count >= w ? s : s + String(repeating: " ", count: w - s.count)

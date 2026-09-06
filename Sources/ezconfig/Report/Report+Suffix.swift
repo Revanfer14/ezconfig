@@ -49,11 +49,15 @@ extension Report {
         for s in suspicious {
             out("  \(s.target)  [\(s.site)]")
             out("    \(s.value)")
+            if s.resolved != s.value {
+                out("    setelah init: \(s.resolved)")
+            }
             out("    komponen '\(s.component)' bentuknya kayak suffix lokal, tapi")
             out("    nggak cocok sama Local.xcconfig maupun sertifikat di keychain.")
         }
         out("")
-        out("  ezconfig nggak nebak — nilainya dibiarin apa adanya.")
+        out("  ezconfig nggak nebak, nilainya dibiarin apa adanya.")
+        out("  `check` juga nggak bakal ngeblokir nilai ini, jadi commit tetap jalan.")
         out("  Kemungkinan besar suffix dari Apple ID lama yang sertifikatnya")
         out("  udah dihapus. Benerin bundle ID-nya di Xcode, atau tentuin")
         out("  prefix manual: ezconfig init --prefix <id>")

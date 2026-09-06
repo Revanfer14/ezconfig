@@ -13,7 +13,7 @@ struct Ezconfig: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "ezconfig",
         abstract: "Automate multi-developer (with Individual Apple Membership Program) code signing for Xcode projects",
-        version: "0.1.0",
+        version: EzconfigVersion.current,
         subcommands: [InitCommand.self, Setup.self, Check.self, Clean.self, Inspect.self],
     )
         

@@ -21,23 +21,75 @@ extension Ezconfig {
             commandName: "init",
             abstract: "Extract signing identity from .pbxproj and create Base.xcconfig."
         )
-        
+
+        @OptionGroup var options: ProjectOptions
+
         @Option(name: .long, help: "Paksa prefix bundle ID kanonik.")
         var prefix: String?
-        
+
         @Flag(name: .long, help: "Cuma tampilkan rencana, jangan nulis apa-apa.")
         var dryRun = false
-        
+
+        @Flag(name: .long, help: "Jalan walaupun Xcode lagi kebuka.")
+        var force = false
+
+        @Flag(name: .long, help: "Jangan jalanin setup sesudah init.")
+        var noSetup = false
+
+        @Option(name: .long, help: "Team ID buat setup otomatis sesudah init.")
+        var team: String?
+
         func run() throws {
-            let cwd = Path.current
-            guard let projectPath = cwd.glob("*.xcodeproj").first else {
-                throw ValidationError("Nggak nemu .xcodeproj di \(cwd). Pindah ke root project dulu.")
+            if !dryRun, !force, Xcode.isRunning {
+                throw ValidationError("""
+                Xcode lagi jalan.
+
+                Xcode nyimpen nilai build setting yang udah ke-resolve di memori.
+                Kalau dia buka project ini waktu `init` jalan, nilai lama bisa
+                ditulis balik sesudahnya, lengkap sama suffix lokal lo. Hasilnya
+                nggak keliatan salah: init sukses, check bersih, build jalan,
+                tapi Release bawa identitas lo.
+
+                Tutup Xcode dulu, lalu jalanin lagi.
+                Kalau project yang kebuka bukan yang ini: ezconfig init --force
+                """)
             }
-            
+
+            let projectPath = Path(try ProjectReader.locate(in: options.path))
+
             let writer = try ProjectWriter(projectPath: projectPath)
-            let outcome = try writer.runInit(overridePrefix: prefix, dryRun: dryRun)
-            
+            var outcome = try writer.runInit(overridePrefix: prefix, dryRun: dryRun)
+
+            if !dryRun && !noSetup {
+                outcome.setup = runSetup(
+                    sourceRoot: projectPath.parent(),
+                    projectPath: projectPath.string,
+                    team: team
+                )
+            }
+
             Report.printInit(outcome, projectName: projectPath.lastComponent, dryRun: dryRun)
+        }
+
+        // Setup nggak boleh bikin init gagal. Waktu ini kepanggil, .pbxproj udah
+        // ditulis, jadi throw di sini ninggalin project setengah jadi.
+        private func runSetup(
+            sourceRoot: Path,
+            projectPath: String,
+            team: String?
+        ) -> Result<SetupOutcome, Error> {
+            do {
+                let identity = try Keychain.resolve(override: team)
+                return .success(
+                    try LocalConfig.run(
+                        sourceRoot: sourceRoot,
+                        projectPath: projectPath,
+                        identity: identity
+                    )
+                )
+            } catch {
+                return .failure(error)
+            }
         }
     }
     
@@ -83,12 +135,29 @@ extension Ezconfig {
         @Flag(name: .long, help: "Tolak juga nilai literal di target yang nggak diadopsi.")
         var strict = false
         
+        func validate() throws {
+            guard !(fix && strict) else {
+                throw ValidationError("""
+                --strict nggak bisa dipasangin --fix.
+                --strict nolak nilai literal di target yang nggak diadopsi ezconfig,
+                dan nilai itu nggak punya template, jadi --fix nggak akan pernah bisa
+                nyembuhin. Pakai --strict sendirian buat audit, benerin manual di Xcode.
+                """)
+            }
+        }
+        
         func run() throws {
             let ctx = try CheckContext.resolve(path: options.path, staged: staged)
             guard let text = ctx.text else { return }
             
             let suffixes = LocalConfig.knownSuffixes(sourceRoot: ctx.sourceRoot)
-            let allow = strict ? [] : CheckPolicy.allowlist(projectPath: ctx.projectPath.string)
+            
+            // `--strict` cuma nolak nilai literal di target yang nggak diadopsi.
+            // Himpunan `unfixable` tetap jalan, kalau nggak `--fix --strict`
+            // balik buntu dan printFixFailed bakal nuduh ezconfig bug.
+            var allow = CheckPolicy.allowlist(projectPath: ctx.projectPath.string)
+            if strict { allow.outsidePrefix = [] }
+            
             let split = CheckPolicy.split(
                 PbxprojScanner.scan(text, suffixes: suffixes),
                 allowlist: allow
@@ -98,13 +167,15 @@ extension Ezconfig {
                 projectPath: ctx.projectPath.string
             )
             
-            // Bersih dari yang wajib dibersihin.
             guard !split.blocking.isEmpty else {
                 if !staged {
-                    print("✓ \(ctx.projectName) bersih (\(ctx.source.label)) — nggak ada identitas literal.")
+                    print("✓ \(ctx.projectName) bersih (\(ctx.source.label)), nggak ada identitas literal.")
                     Report.printTolerated(split.tolerated, toStdout: true)
+                    Report.printUnfixable(split.unfixable, toStdout: true)
                     Report.printAudit(audit, toStdout: true)
                 } else {
+                    // Mode hook: ini satu-satunya momen developer liat output ezconfig.
+                    Report.printUnfixable(split.unfixable, toStdout: false)
                     Report.printAudit(audit, toStdout: false)
                 }
                 return
@@ -113,14 +184,13 @@ extension Ezconfig {
             guard fix else {
                 Report.printCheck(split.blocking, projectName: ctx.projectName, source: ctx.source)
                 Report.printTolerated(split.tolerated, toStdout: false)
+                Report.printUnfixable(split.unfixable, toStdout: false)
                 throw ExitCode.failure
             }
             
             let writer = try ProjectWriter(projectPath: ctx.projectPath)
             let outcome = try writer.runStrip()
             
-            // Residu diklasifikasi ulang. Yang ditoleransi bukan kegagalan —
-            // tanpa ini, repo dengan target di luar prefix nggak bisa commit selamanya.
             let residue = CheckPolicy.split(
                 PbxprojScanner.scan(try ctx.pbxprojPath.read(), suffixes: suffixes),
                 allowlist: allow
@@ -133,6 +203,7 @@ extension Ezconfig {
             guard staged else {
                 Report.printFixed(outcome, restaged: false)
                 Report.printFixTolerated(residue.tolerated)
+                Report.printUnfixable(residue.unfixable, toStdout: false)
                 return
             }
             
@@ -141,6 +212,7 @@ extension Ezconfig {
             }
             Report.printFixed(outcome, restaged: true)
             Report.printFixTolerated(residue.tolerated)
+            Report.printUnfixable(residue.unfixable, toStdout: false)
             throw ExitCode.failure
         }
     }
@@ -154,7 +226,10 @@ extension Ezconfig {
         @OptionGroup var options: ProjectOptions
         
         func run() throws {
-            print("ezconfig clean — belum diimplementasi")
+            let projectPath = Path(try ProjectReader.locate(in: options.path))
+            let writer = try ProjectWriter(projectPath: projectPath)
+            let outcome = try writer.runStrip()
+            Report.printClean(outcome, projectName: projectPath.lastComponent)
         }
     }
     

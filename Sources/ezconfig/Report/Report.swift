@@ -75,6 +75,65 @@ enum Report {
         s.count >= width ? s : s + String(repeating: " ", count: width - s.count)
     }
     
+    @discardableResult
+    static func printStripLines(_ o: StripOutcome) -> Bool {
+        let out: (String) -> Void = { Swift.print($0) }
+        var any = false
+
+        if o.teamsRemoved > 0 {
+            out("  \(pad("DEVELOPMENT_TEAM", 34))removed \(o.teamsRemoved) \(plural(o.teamsRemoved, "occurrence"))")
+            any = true
+        }
+        if o.attributeTeamsRemoved > 0 {
+            out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed \(o.attributeTeamsRemoved) \(plural(o.attributeTeamsRemoved, "target"))")
+            any = true
+        }
+        if o.provisioningRemoved > 0 {
+            out("  \(pad("PROVISIONING_PROFILE*", 34))removed \(o.provisioningRemoved) \(plural(o.provisioningRemoved, "occurrence"))")
+            any = true
+        }
+        if o.bundleIDsRewritten > 0 {
+            out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ variabel  "
+                + "(\(o.bundleIDsRewritten) \(plural(o.bundleIDsRewritten, "configuration")))")
+            any = true
+        }
+        if o.companionsRewritten > 0 {
+            out("  \(pad("INFOPLIST_KEY_WKCompanion*", 34))→ variabel  "
+                + "(\(o.companionsRewritten) \(plural(o.companionsRewritten, "configuration")))")
+            any = true
+        }
+        return any
+    }
+
+    static func printClean(_ o: StripOutcome, projectName: String) {
+        let out: (String) -> Void = { Swift.print($0) }
+
+        out("")
+        out("ezconfig \(EzconfigVersion.current)")
+        out("")
+        out("▸ \(projectName)")
+        out("")
+
+        guard !o.isEmpty else {
+            out("  Nggak ada yang perlu dibersihin, .pbxproj udah bersih.")
+            out("")
+            return
+        }
+
+        printStripLines(o)
+        out("")
+
+        if !o.touchedTargets.isEmpty {
+            out("▸ Target yang disentuh")
+            for t in o.touchedTargets.sorted() { out("  \(t)") }
+            out("")
+        }
+
+        out(String(repeating: "─", count: 50))
+        out("  .pbxproj bersih. Commit hasilnya.")
+        out("")
+    }
+    
     static func printInit(_ o: InitOutcome, projectName: String, dryRun: Bool) {
         let out: (String) -> Void = { Swift.print($0) }
         let rule = String(repeating: "─", count: 50)
@@ -96,7 +155,8 @@ enum Report {
             out("  ✓ \(pad(a.target, width))  \(a.template)")
         }
         for s in o.skipped {
-            out("  ✗ \(pad(s.target, width))  DILEWATIN — \(s.reason)")
+            let mark = s.blocksCheck ? "✗" : "·"
+            out("  \(mark) \(pad(s.target, width))  DILEWATIN, \(s.reason)")
             if let b = s.bundleID {
                 out("    \(pad("", width))  bundle ID tetap literal: \(b)")
             }
@@ -121,33 +181,9 @@ enum Report {
         
         // Strip
         out("▸ Stripping .pbxproj")
-        var stripped = false
-        
-        if o.strip.teamsRemoved > 0 {
-            out("  \(pad("DEVELOPMENT_TEAM", 34))removed \(o.strip.teamsRemoved) \(plural(o.strip.teamsRemoved, "occurrence"))")
-            stripped = true
-        }
-        if o.strip.attributeTeamsRemoved > 0 {
-            out("  \(pad("TargetAttributes.DevelopmentTeam", 34))removed \(o.strip.attributeTeamsRemoved) \(plural(o.strip.attributeTeamsRemoved, "target"))")
-            stripped = true
-        }
-        if o.strip.provisioningRemoved > 0 {
-            out("  \(pad("PROVISIONING_PROFILE*", 34))removed \(o.strip.provisioningRemoved) \(plural(o.strip.provisioningRemoved, "occurrence"))")
-            stripped = true
-        }
-        if o.strip.bundleIDsRewritten > 0 {
-            out("  \(pad("PRODUCT_BUNDLE_IDENTIFIER", 34))→ variabel  "
-                + "(\(o.strip.bundleIDsRewritten) \(plural(o.strip.bundleIDsRewritten, "configuration")))")
-            stripped = true
-        }
-        if o.strip.companionsRewritten > 0 {
-            out("  \(pad("INFOPLIST_KEY_WKCompanion*", 34))→ variabel  "
-                + "(\(o.strip.companionsRewritten) \(plural(o.strip.companionsRewritten, "configuration")))")
-            stripped = true
-        }
-        if !stripped {
-            out("  Nggak ada identitas literal — .pbxproj emang udah bersih.")
-        }
+                if !printStripLines(o.strip) {
+                    out("  Nggak ada identitas literal, .pbxproj emang udah bersih.")
+                }
         out("")
         
         out("▸ Writing \(o.baseConfigPath)")
@@ -244,12 +280,54 @@ enum Report {
             out("")
         }
         
+        let blocking = o.skipped.filter(\.blocksCheck)
+        if !blocking.isEmpty {
+            out("  ⚠︎  \(blocking.count) target dilewatin, bundle ID-nya masih literal,")
+            out("     jadi `check` bakal terus nolak commit. Samain bundle ID-nya")
+            out("     di Xcode, atau tentuin prefix manual: ezconfig init --prefix <id>")
+            out("")
+        }
+        
+        let watchSkips = o.skipped.filter { $0.reason.hasPrefix("watch app di luar prefix") }
+        if !watchSkips.isEmpty {
+            out("  ⚠︎  Watch app ke-skip. Ini beda dari widget yang sengaja beda")
+            out("     bundle ID, watch app harus satu prefix sama app induknya.")
+            for w in watchSkips {
+                out("     \(w.target)")
+                if let b = w.bundleID { out("       sekarang  \(b)") }
+                out("       harusnya  \(o.canonicalPrefix)<sisa>")
+            }
+            out("     Di Xcode, buka target itu:")
+            out("       Signing & Capabilities  →  Bundle Identifier")
+            out("       Build Settings  →  WKCompanionAppBundleIdentifier")
+            out("     Dua-duanya harus nunjuk prefix yang sama, lalu init ulang.")
+            out("")
+        }
+        
+        switch o.setup {
+        case let .success(s):
+            out("▸ Setup")
+            out("  \(pad("Team ID", 18))\(s.teamID)")
+            out("  \(pad("Sertifikat", 18))\(s.displayName)")
+            out("  \(pad("Suffix Debug", 18))\(s.suffix)")
+            out("  \(pad("Ditulis", 18))\(s.localPath)")
+            out("")
+        case let .failure(e):
+            out("▸ Setup DILEWATIN")
+            out("  \(e)")
+            out("")
+            out("  init-nya sendiri sukses. Beresin di atas, lalu: ezconfig setup")
+            out("")
+        case nil:
+            break
+        }
+        
         if o.localConfigExists {
-            out("  .pbxproj bersih. Configs/Local.xcconfig kedeteksi —")
-            out("  buka project dan build buat verifikasi.")
+            out("  Beres. Buka project dan build buat verifikasi.")
+            out("  Tim lo cukup: brew install revan/adac9/ezconfig && ezconfig setup")
         } else {
-            out("  .pbxproj bersih. Jalanin `ezconfig setup` dulu")
-            out("  sebelum build — Configs/Local.xcconfig belum ada.")
+            out("  .pbxproj bersih, tapi Configs/Local.xcconfig belum ada.")
+            out("  Jalanin `ezconfig setup` dulu sebelum build.")
         }
         out("")
     }

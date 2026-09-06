@@ -69,6 +69,7 @@ struct InitOutcome {
         let target: String
         let reason: String
         let bundleID: String?
+        let blocksCheck: Bool
     }
     
     var canonicalPrefix = ""
@@ -79,6 +80,8 @@ struct InitOutcome {
     var baseConfigPath = ""
     var localConfigExists = false
     var hook = HookOutcome()
+    var git = GitOutcome()
+    var setup: Result<SetupOutcome, Error>?
     
     var companionEdits: [(target: String, site: String, from: String, to: String)] = []
     var companionUnresolved: [(target: String, site: String, from: String)] = []
@@ -145,7 +148,8 @@ struct ProjectWriter {
                 .init(
                     target: e.target.name,
                     reason: reasonText(e.decision),
-                    bundleID: e.currentBundleID
+                    bundleID: e.currentBundleID,
+                    blocksCheck: e.target.isSignable
                 )
             )
         }
@@ -206,21 +210,26 @@ struct ProjectWriter {
             return outcome
         }
         
-        // 2. Daftarin xcconfig sekali, sambungin ke tiap konfigurasi tiap target.
+        // 2. Daftarin xcconfig sekali.
         let fileRef = try registerBaseConfigFile(at: basePath)
         let editsByTarget = edits(from: plan)
-        
+
+        for target in xcodeproj.pbxproj.nativeTargets.sorted(by: { $0.name < $1.name }) {
+            stripTarget(
+                target,
+                edits: editsByTarget[target.name] ?? TargetEdits(),
+                into: &outcome.strip
+            )
+        }
+
+        // Link xcconfig cuma ke target yang diadopsi.
         for target in touchTargets.sorted(by: { $0.name < $1.name }) {
             var linked: [String] = []
             for config in target.buildConfigurationList?.buildConfigurations ?? [] {
                 config.baseConfiguration = fileRef
                 linked.append(config.name)
             }
-            
-            let edit = editsByTarget[target.name] ?? TargetEdits()
-            stripTarget(target, edits: edit, into: &outcome.strip)
-            
-            if let template = edit.bundleIDTemplate {
+            if let template = editsByTarget[target.name]?.bundleIDTemplate {
                 outcome.adopted.append(
                     .init(target: target.name, template: template, configs: linked.sorted())
                 )
@@ -242,6 +251,7 @@ struct ProjectWriter {
         rewriteEntitlements(plan, into: &outcome)
         scanHardcodedGroups(plan, into: &outcome)
         
+        outcome.git = Gitignore.ensure(sourceRoot: sourceRoot)
         outcome.hook = HookInstaller.install(sourceRoot: sourceRoot)
         outcome.localConfigExists = (configsDir + "Local.xcconfig").exists
         
