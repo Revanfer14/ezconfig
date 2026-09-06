@@ -14,150 +14,141 @@ private struct StdErr: TextOutputStream {
 }
 
 extension Report {
-    
-    static func printTolerated(_ findings: [Finding], toStdout: Bool) {
-        guard !findings.isEmpty else { return }
+
+    private static func emitter(toStdout: Bool) -> (String) -> Void {
         var err = StdErr()
-        let emit: (String) -> Void = { line in
+        return { line in
             if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
         }
-
-        emit("")
-        emit("  \(findings.count) nilai literal dibiarin (target di luar prefix):")
-        for f in findings {
-            emit("    line \(f.line)  \(f.key.label)  \(f.value)")
-        }
-        emit("  Ini bukan kebocoran — target itu emang nggak diadopsi ezconfig.")
-        emit("  Kalau mau ikut diadopsi: samain bundle ID-nya di Xcode, lalu ezconfig init.")
     }
 
-    static func printAudit(_ audit: ConfigAudit, toStdout: Bool) {
-        guard !audit.isClean, audit.baseExists else { return }
-        var err = StdErr()
-        let emit: (String) -> Void = { line in
-            if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
-        }
-
-        emit("")
-        emit("  ⚠︎  Variabel dipakai di entitlements tapi nggak ada di Base.xcconfig:")
-        for u in audit.undefined {
-            emit("     \(u.file)  →  $(\(u.variable))")
-        }
-        emit("     Nilainya bakal kosong waktu build. Jalanin: ezconfig init")
-    }
-
-    static func printFixTolerated(_ findings: [Finding]) {
-        guard !findings.isEmpty else { return }
-        var err = StdErr()
-        Swift.print("", to: &err)
-        Swift.print("  \(findings.count) nilai dibiarin apa adanya (target di luar prefix) — commit lanjut.", to: &err)
-    }
-    
-    static func printFixed(_ o: StripOutcome, restaged: Bool) {
-        var err = StdErr()
-
-        if o.isEmpty {
-            Swift.print("ezconfig: .pbxproj di disk udah bersih — staging area di-sinkronin ulang.", to: &err)
-        } else {
-            var parts: [String] = []
-            if o.teamsRemoved > 0 { parts.append("\(o.teamsRemoved) DEVELOPMENT_TEAM") }
-            if o.attributeTeamsRemoved > 0 { parts.append("\(o.attributeTeamsRemoved) TargetAttributes") }
-            if o.provisioningRemoved > 0 { parts.append("\(o.provisioningRemoved) PROVISIONING_PROFILE*") }
-            if o.bundleIDsRewritten > 0 { parts.append("\(o.bundleIDsRewritten) bundle ID → $(BUNDLE_PREFIX)") }
-            if o.companionsRewritten > 0 { parts.append("\(o.companionsRewritten) companion → $(BUNDLE_PREFIX)") }
-            Swift.print("ezconfig: signing identity dibersihin — \(parts.joined(separator: ", ")).", to: &err)
-        }
-
-        if restaged {
-            Swift.print("", to: &err)
-            Swift.print("  File udah di-stage ulang. Commit sekali lagi buat lanjut.", to: &err)
-            Swift.print("", to: &err)
-        }
-    }
-
-    static func printFixFailed(_ residue: [Finding], projectName: String) {
-        var err = StdErr()
-        Swift.print("ezconfig: fix gagal — \(residue.count) nilai masih ketinggalan di \(projectName).", to: &err)
-        Swift.print("", to: &err)
-        for f in residue {
-            Swift.print("  line \(f.line)  \(f.key.label)  \(f.value)", to: &err)
-        }
-        Swift.print("", to: &err)
-        Swift.print("  Ini bug ezconfig. Perbaiki manual dulu di Xcode.", to: &err)
-        Swift.print("", to: &err)
+    private static func findingLine(_ f: Finding, width: Int) -> String {
+        "    line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)"
     }
 
     static func printCheck(_ findings: [Finding], projectName: String, source: CheckContext.Source) {
-        var err = StdErr()
+        let emit = emitter(toStdout: false)
 
         let leaks = findings.filter(\.isSuffixLeak)
         let literals = findings.filter { !$0.isSuffixLeak }
         let noun = findings.count == 1 ? "value" : "values"
 
         // Baris pertama HARUS berdiri sendiri, GitHub Desktop motong sisanya.
-        Swift.print(
-            "ezconfig: \(findings.count) signing \(noun) in \(projectName) [\(source.label)], commit blocked.",
-            to: &err
-        )
-        Swift.print("", to: &err)
+        emit("ezconfig: \(findings.count) signing \(noun) in \(projectName), commit blocked.")
+        emit("")
 
         let width = findings.map(\.key.label.count).max() ?? 0
 
         if !literals.isEmpty {
-            Swift.print("  Nilai literal:", to: &err)
-            for f in literals {
-                Swift.print("    line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)", to: &err)
-            }
-            Swift.print("", to: &err)
+            emit("  Hardcoded values (checked in \(source.label))")
+            for f in literals { emit(findingLine(f, width: width)) }
+            emit("")
         }
 
         if !leaks.isEmpty {
-            Swift.print("  Suffix lokal ikut kebawa di nilai variabel:", to: &err)
+            emit("  Your machine's suffix leaked into a variable value")
             for f in leaks {
-                Swift.print("    line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)", to: &err)
+                emit(findingLine(f, width: width))
                 if let s = f.suffix {
-                    Swift.print("    \(padRight("", 5 + 8))\(padRight("", width))  ↑ '\(s)' itu suffix lokal", to: &err)
+                    emit("    \(padRight("", 5 + 8))\(padRight("", width))  '\(s)' is yours")
                 }
             }
-            Swift.print("", to: &err)
-            Swift.print("  Nilainya keliatan bener karena diawali $(, tapi Xcode nyuntik", to: &err)
-            Swift.print("  suffix mesin lo ke dalamnya. Kalau ini ke-commit, developer lain", to: &err)
-            Swift.print("  dapet bundle ID yang nggak nyambung, dan Release bawa identitas lo.", to: &err)
-            Swift.print("", to: &err)
+            emit("    Committing this gives everyone else a bundle ID that does not")
+            emit("    resolve, and puts your identity into Release builds.")
+            emit("")
         }
 
-        Swift.print("  Fix: ezconfig check --fix", to: &err)
-        Swift.print("", to: &err)
+        emit("  Fix: ezconfig check --fix")
+        emit("")
     }
-    
+
+    static func printFixed(_ o: StripOutcome, restaged: Bool) {
+        let emit = emitter(toStdout: false)
+
+        if o.isEmpty {
+            emit("ezconfig: .pbxproj on disk was already clean, staging area re-synced.")
+        } else {
+            var parts: [String] = []
+            if o.teamsRemoved > 0 { parts.append("\(o.teamsRemoved) DEVELOPMENT_TEAM") }
+            if o.attributeTeamsRemoved > 0 { parts.append("\(o.attributeTeamsRemoved) TargetAttributes") }
+            if o.provisioningRemoved > 0 { parts.append("\(o.provisioningRemoved) PROVISIONING_PROFILE*") }
+            if o.bundleIDsRewritten > 0 { parts.append("\(o.bundleIDsRewritten) bundle ID") }
+            if o.companionsRewritten > 0 { parts.append("\(o.companionsRewritten) companion reference") }
+            emit("ezconfig: cleaned \(parts.joined(separator: ", ")).")
+        }
+
+        if restaged {
+            emit("")
+            emit("  Files re-staged. Commit again to continue.")
+            emit("")
+        }
+    }
+
+    static func printFixFailed(_ residue: [Finding], projectName: String) {
+        let emit = emitter(toStdout: false)
+        let width = residue.map(\.key.label.count).max() ?? 0
+
+        emit("ezconfig: could not clean \(residue.count) value(s) in \(projectName).")
+        emit("")
+        for f in residue { emit(findingLine(f, width: width)) }
+        emit("")
+        emit("  This is an ezconfig bug. Fix these in Xcode to get unblocked, then")
+        emit("  please report it: github.com/Revanfer14/ezconfig/issues")
+        emit("")
+    }
+
+    static func printTolerated(_ findings: [Finding], toStdout: Bool) {
+        guard !findings.isEmpty else { return }
+        let emit = emitter(toStdout: toStdout)
+        let width = findings.map(\.key.label.count).max() ?? 0
+
+        emit("")
+        emit("  \(findings.count) hardcoded value(s) left alone, in targets ezconfig does not manage")
+        for f in findings { emit(findingLine(f, width: width)) }
+        emit("    To bring them in: give them the same bundle ID prefix in Xcode,")
+        emit("    then run ezconfig init.")
+    }
+
+    static func printFixTolerated(_ findings: [Finding]) {
+        guard !findings.isEmpty else { return }
+        let emit = emitter(toStdout: false)
+        emit("")
+        emit("  \(findings.count) value(s) left alone, in targets ezconfig does not manage.")
+    }
+
     static func printUnfixable(_ findings: [Finding], toStdout: Bool) {
         guard !findings.isEmpty else { return }
-        var err = StdErr()
-        let emit: (String) -> Void = { line in
-            if toStdout { Swift.print(line) } else { Swift.print(line, to: &err) }
-        }
+        let emit = emitter(toStdout: toStdout)
+        let width = findings.map(\.key.label.count).max() ?? 0
 
         emit("")
-        emit("  ⚠︎  \(findings.count) nilai ngandung komponen yang bentuknya kayak suffix lokal:")
-        for f in findings {
-            emit("     line \(f.line)  \(f.key.label)  \(f.value)")
-        }
+        emit("  \(findings.count) value(s) contain something shaped like a Team ID")
+        for f in findings { emit(findingLine(f, width: width)) }
         emit("")
-        emit("     Komponennya nggak nempel di belakang prefix, jadi ezconfig nggak")
-        emit("     bisa mastiin itu suntikan Xcode atau emang bagian nama target.")
-        emit("     Sesuai prinsipnya, ezconfig nggak nebak: commit ini DILANJUT.")
+        emit("    It is not attached to the prefix, so ezconfig cannot tell whether")
+        emit("    it is your identity or part of a target name. This commit goes")
+        emit("    through, but if it is yours it ships in Release too.")
         emit("")
-        emit("     Kalau itu beneran identitas lo, dia ikut ke Release juga, dan")
-        emit("     App ID-nya bisa ke-claim di App Store Connect atas nama lo.")
-        emit("     Benerin bundle ID-nya di Xcode, atau tentuin prefix manual:")
-        emit("       ezconfig init --prefix <id>")
+        emit("    Fix the bundle ID in Xcode, or: ezconfig init --prefix <id>")
     }
 
-    private static func padRight(_ s: String, _ w: Int) -> String {
+    static func printAudit(_ audit: ConfigAudit, toStdout: Bool) {
+        guard !audit.isClean, audit.baseExists else { return }
+        let emit = emitter(toStdout: toStdout)
+
+        emit("")
+        emit("  Variables used in entitlements but missing from Base.xcconfig")
+        for u in audit.undefined {
+            emit("    \(u.file)   $(\(u.variable))")
+        }
+        emit("    They resolve to nothing at build time. Run: ezconfig init")
+    }
+
+    static func padRight(_ s: String, _ w: Int) -> String {
         s.count >= w ? s : s + String(repeating: " ", count: w - s.count)
     }
 
-    private static func padLeft(_ s: String, _ w: Int) -> String {
+    static func padLeft(_ s: String, _ w: Int) -> String {
         s.count >= w ? s : String(repeating: " ", count: w - s.count) + s
     }
 }

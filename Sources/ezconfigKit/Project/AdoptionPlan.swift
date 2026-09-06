@@ -11,28 +11,48 @@ enum PlanError: Error, CustomStringConvertible {
     case noAnchor([String])
     case ambiguousAnchor([String])
     case anchorConflict(target: String, values: [String])
-    
+    case prefixLost(target: String)
+
     var description: String {
         switch self {
         case .noSignableTarget:
-            return "Nggak ada target yang punya PRODUCT_BUNDLE_IDENTIFIER."
+            return "No target in this project has a PRODUCT_BUNDLE_IDENTIFIER."
+
+        case let .prefixLost(target):
+            return """
+            This project is already set up, but Configs/Base.xcconfig is missing.
+
+            Target '\(target)' points at $(BUNDLE_PREFIX), and that variable only
+            lives in Base.xcconfig, so the prefix cannot be recovered from the
+            project file alone.
+
+            Restore it:
+              git checkout Configs/Base.xcconfig
+            """
+
         case let .noAnchor(names):
             return """
-            Nggak nemu target aplikasi buat dijadiin acuan prefix.
-            Target yang ada: \(names.joined(separator: ", "))
-            Tentuin manual: ezconfig init --prefix com.contoh.app
+            No app target to take the bundle ID prefix from.
+            Targets found: \(names.joined(separator: ", "))
+
+            Set it by hand: ezconfig init --prefix com.example.app
             """
+
         case let .ambiguousAnchor(names):
             return """
-            Ada \(names.count) target aplikasi: \(names.joined(separator: ", "))
-            ezconfig nggak nebak yang mana yang jadi acuan.
-            Tentuin manual: ezconfig init --prefix com.contoh.app
+            \(names.count) app targets found: \(names.joined(separator: ", "))
+            ezconfig will not guess which one the prefix comes from.
+
+            Set it by hand: ezconfig init --prefix com.example.app
             """
+
         case let .anchorConflict(target, values):
             return """
-            Target acuan '\(target)' punya bundle ID beda antar konfigurasi:
+            Target '\(target)' has a different bundle ID per configuration:
               \(values.joined(separator: "\n  "))
-            Samain dulu di Xcode, atau tentuin manual: ezconfig init --prefix <id>
+
+            Make them match in Xcode, or set the prefix by hand:
+              ezconfig init --prefix <id>
             """
         }
     }
@@ -451,14 +471,19 @@ private func resolvePrefix(
     let anchor = apps[0]
     // Base.xcconfig nggak ada tapi Local.xcconfig ada → anchor-nya sendiri
     // bisa tercemar. Suffix app selalu di ekor.
+    let all = anchor.configs.compactMap(\.bundleID)
     let literals = Set(
-        anchor.configs.compactMap(\.bundleID)
-            .filter { !$0.isVariable }
+        all.filter { !$0.isVariable }
             .map { SuffixCleaner.cleanTrailing($0.value, suffixes: suffixes).value }
     )
-    
+
     switch literals.count {
     case 0:
+        // Anchor ketemu tapi nilainya variabel semua: project udah pernah
+        // di-init, Base.xcconfig-nya yang ilang.
+        if all.contains(where: \.isVariable) {
+            throw PlanError.prefixLost(target: anchor.name)
+        }
         throw PlanError.noAnchor([anchor.name])
     case 1:
         return (literals.first!, "target \(anchor.name)")

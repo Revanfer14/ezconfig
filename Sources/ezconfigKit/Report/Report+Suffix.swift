@@ -9,58 +9,83 @@ import Foundation
 
 extension Report {
 
+    // Blok ringkas: apa yang dibuang, dari mana. Konsekuensinya (App ID
+    // ke-claim di portal) naik jadi item attention, bukan paragraf di sini.
+    static func suffixCleaningLines(_ cleanings: [SuffixCleaning]) -> [String] {
+        guard !cleanings.isEmpty else { return [] }
+
+        var lines = ["Removed your local identity from \(cleanings.count) value\(cleanings.count == 1 ? "" : "s")"]
+
+        var order: [String] = []
+        var byTarget: [String: [SuffixCleaning]] = [:]
+        for c in cleanings {
+            if byTarget[c.target] == nil { order.append(c.target) }
+            byTarget[c.target, default: []].append(c)
+        }
+
+        for target in order {
+            for c in byTarget[target] ?? [] {
+                let where_ = target == "—" ? c.site : "\(target) / \(c.site)"
+                lines.append("  \(where_)")
+                lines.append("    \(c.from)")
+                lines.append("    \(c.to)   (dropped \(c.suffix))")
+            }
+        }
+        return lines
+    }
+
+    // Peringatan portal cuma relevan kalau emang ada yang dibersihin.
+    static func suffixCleaningAttention(_ cleanings: [SuffixCleaning]) -> [[String]] {
+        guard !cleanings.isEmpty else { return [] }
+        return [[
+            "Your Team ID may already be on App Store Connect",
+            "",
+            "Xcode had written your identity into values that get committed.",
+            "They are cleaned now, but if any of them reached Release or",
+            "TestFlight earlier, the App ID is registered under your account",
+            "and cannot be released.",
+            "",
+            "Check developer.apple.com > Identifiers before shipping again.",
+        ]]
+    }
+
+    static func suspiciousAttention(_ suspicious: [SuspiciousSuffix]) -> [[String]] {
+        guard !suspicious.isEmpty else { return [] }
+
+        var lines = ["Some bundle IDs contain something that looks like a Team ID", ""]
+
+        for s in suspicious {
+            lines.append("  \(s.target) / \(s.site)")
+            lines.append("    \(s.value)")
+            if s.resolved != s.value {
+                lines.append("    becomes \(s.resolved)")
+            }
+            lines.append("    '\(s.component)' has the shape of a local suffix")
+        }
+
+        lines.append("")
+        lines.append("It is not attached to the prefix, so ezconfig cannot tell whether")
+        lines.append("it is your identity or part of a target name. Nothing was changed,")
+        lines.append("and `check` will not block commits over it.")
+        lines.append("")
+        lines.append("If it is your identity, fix the bundle ID in Xcode, or set the")
+        lines.append("prefix by hand:")
+        lines.append("  ezconfig init --prefix <id>")
+
+        return [lines]
+    }
+
+    // Dipakai `inspect`, yang emang alat diagnostik dan boleh verbose.
     static func printSuffixCleanings(
         _ cleanings: [SuffixCleaning],
         suspicious: [SuspiciousSuffix]
     ) {
-        let out: (String) -> Void = { Swift.print($0) }
+        for line in suffixCleaningLines(cleanings) { Swift.print(line) }
+        if !cleanings.isEmpty { Swift.print("") }
 
-        if !cleanings.isEmpty {
-            out("▸ Identitas lokal dibersihin")
-            out("  Xcode nulis nilai dari hasil resolve di mesin lo, bukan dari")
-            out("  $(BUNDLE_PREFIX) — jadi suffix lokal ikut kebawa. Dibuang otomatis.")
-            out("")
-
-            var order: [String] = []
-            var byTarget: [String: [SuffixCleaning]] = [:]
-            for c in cleanings {
-                if byTarget[c.target] == nil { order.append(c.target) }
-                byTarget[c.target, default: []].append(c)
-            }
-
-            for target in order {
-                out("  \(target == "—" ? "(project)" : target)")
-                for c in byTarget[target] ?? [] {
-                    out("    \(pad(c.site, 12))\(c.from)")
-                    out("    \(pad("", 12))→ \(c.to)   [buang \(c.suffix)]")
-                }
-                out("")
-            }
-
-            out("  ⚠︎  Kalau nilai tercemar itu udah pernah naik ke Release/TestFlight,")
-            out("     App ID-nya kemungkinan udah ke-claim di App Store Connect")
-            out("     dan nggak bisa dilepas. Periksa portal.")
-            out("")
+        for item in suspiciousAttention(suspicious) {
+            for line in item { Swift.print("  " + line) }
+            Swift.print("")
         }
-
-        guard !suspicious.isEmpty else { return }
-
-        out("▸ Suffix nggak dikenali")
-        for s in suspicious {
-            out("  \(s.target)  [\(s.site)]")
-            out("    \(s.value)")
-            if s.resolved != s.value {
-                out("    setelah init: \(s.resolved)")
-            }
-            out("    komponen '\(s.component)' bentuknya kayak suffix lokal, tapi")
-            out("    nggak cocok sama Local.xcconfig maupun sertifikat di keychain.")
-        }
-        out("")
-        out("  ezconfig nggak nebak, nilainya dibiarin apa adanya.")
-        out("  `check` juga nggak bakal ngeblokir nilai ini, jadi commit tetap jalan.")
-        out("  Kemungkinan besar suffix dari Apple ID lama yang sertifikatnya")
-        out("  udah dihapus. Benerin bundle ID-nya di Xcode, atau tentuin")
-        out("  prefix manual: ezconfig init --prefix <id>")
-        out("")
     }
 }

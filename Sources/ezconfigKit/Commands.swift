@@ -169,7 +169,7 @@ extension Ezconfig {
             
             guard !split.blocking.isEmpty else {
                 if !staged {
-                    print("✓ \(ctx.projectName) bersih (\(ctx.source.label)), nggak ada identitas literal.")
+                    print("✓ \(ctx.projectName) is clean (\(ctx.source.label)), no signing identity in it.")
                     Report.printTolerated(split.tolerated, toStdout: true)
                     Report.printUnfixable(split.unfixable, toStdout: true)
                     Report.printAudit(audit, toStdout: true)

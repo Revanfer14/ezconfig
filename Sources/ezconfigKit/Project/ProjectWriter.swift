@@ -78,6 +78,8 @@ struct InitOutcome {
     var skipped: [Skipped] = []
     var strip = StripOutcome()
     var baseConfigPath = ""
+    var baseConfigCreated = false
+    var linkedTargets = 0
     var localConfigExists = false
     var hook = HookOutcome()
     var git = GitOutcome()
@@ -169,7 +171,8 @@ struct ProjectWriter {
         let configsDir = sourceRoot + "Configs"
         let basePath = configsDir + "Base.xcconfig"
         outcome.baseConfigPath = "Configs/Base.xcconfig"
-        
+        outcome.baseConfigCreated = !basePath.exists
+
         if !dryRun {
             try FileManager.default.createDirectory(
                 atPath: configsDir.string,
@@ -222,6 +225,11 @@ struct ProjectWriter {
             )
         }
 
+        // Waktu semua target udah teradopsi, template-nya nil karena nggak ada
+        // yang perlu ditulis. Target-nya tetap dikelola, jadi tetap harus muncul.
+        var planByName: [String: TargetPlan] = [:]
+        for e in plan.entries { planByName[e.target.name] = e }
+
         // Link xcconfig cuma ke target yang diadopsi.
         for target in touchTargets.sorted(by: { $0.name < $1.name }) {
             var linked: [String] = []
@@ -229,11 +237,17 @@ struct ProjectWriter {
                 config.baseConfiguration = fileRef
                 linked.append(config.name)
             }
-            if let template = editsByTarget[target.name]?.bundleIDTemplate {
-                outcome.adopted.append(
-                    .init(target: target.name, template: template, configs: linked.sorted())
-                )
-            }
+            outcome.linkedTargets += 1
+
+            guard let entry = planByName[target.name] else { continue }
+            if case .skip = entry.decision { continue }
+
+            let shown = editsByTarget[target.name]?.bundleIDTemplate
+                ?? entry.currentBundleID
+                ?? AdoptionPlan.token
+            outcome.adopted.append(
+                .init(target: target.name, template: shown, configs: linked.sorted())
+            )
         }
         
         for c in plan.companions where !c.isPlistFile {
