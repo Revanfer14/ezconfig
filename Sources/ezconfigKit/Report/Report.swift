@@ -199,12 +199,20 @@ enum Report {
             changes.append((".entitlements", "\(entGroups) \(plural(entGroups, "value")) in \(o.entitlementEdits.count) \(plural(o.entitlementEdits.count, "file"))"))
         }
         let plistCount = o.plistEdits.reduce(0) { $0 + $1.count }
+        
         if plistCount > 0 {
             changes.append(("Info.plist", "\(plistCount) \(plural(plistCount, "value")) rewritten"))
         }
-        if !o.git.addedRules.isEmpty {
-            changes.append((".gitignore", o.git.addedRules.joined(separator: ", ")))
+        
+        if !o.git.addedRules.isEmpty || !o.git.addedXcodeRules.isEmpty {
+            var parts = o.git.addedRules
+            if !o.git.addedXcodeRules.isEmpty {
+                let n = o.git.addedXcodeRules.count
+                parts.append("\(n) Xcode \(plural(n, "rule"))")
+            }
+            changes.append((".gitignore", parts.joined(separator: ", ")))
         }
+        
         switch o.hook.action {
         case .created:   changes.append(("pre-commit hook", "installed"))
         case .appended:  changes.append(("pre-commit hook", "added to your existing hook"))
@@ -330,6 +338,25 @@ enum Report {
                 "",
                 "init itself succeeded. Fix the above, then run: ezconfig setup",
             ])
+        }
+        
+        if !o.git.trackedButIgnored.isEmpty {
+            let n = o.git.trackedButIgnored.count
+            var lines = [
+                "\(n) tracked \(plural(n, "file")) now \(n == 1 ? "matches" : "match") a .gitignore rule",
+                "",
+            ]
+            for f in o.git.trackedButIgnored.prefix(6) {
+                lines.append("  \(f)")
+            }
+            if n > 6 { lines.append("  and \(n - 6) more") }
+            lines.append("")
+            lines.append("Git does not apply .gitignore to files already in the index, so")
+            lines.append("these keep showing up in every diff. Drop them from tracking:")
+            lines.append("")
+            lines.append("  git rm -r --cached <path>")
+            lines.append("  git commit -m \"chore: untrack build artifacts\"")
+            attention.append(lines)
         }
         
         printAttention(attention)

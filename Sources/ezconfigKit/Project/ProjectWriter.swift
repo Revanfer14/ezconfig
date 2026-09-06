@@ -265,7 +265,7 @@ struct ProjectWriter {
         rewriteEntitlements(plan, into: &outcome)
         scanHardcodedGroups(plan, into: &outcome)
         
-        outcome.git = Gitignore.ensure(sourceRoot: sourceRoot)
+        outcome.git = Gitignore.ensure(sourceRoot: sourceRoot, includeXcodeDefaults: true)
         outcome.hook = HookInstaller.install(sourceRoot: sourceRoot)
         outcome.localConfigExists = (configsDir + "Local.xcconfig").exists
         
