@@ -258,15 +258,27 @@ enum Report {
         }
         out("")
         
-        // Closing
-        out(rule)
-        if !o.skipped.isEmpty {
-            out("  ⚠︎  \(o.skipped.count) target dilewatin — bundle ID-nya masih literal,")
-            out("     jadi `check` bakal terus nolak commit. Samain bundle ID-nya")
-            out("     di Xcode, atau tentuin prefix manual: ezconfig init --prefix <id>")
+        
+        switch o.setup {
+        case let .success(s):
+            out("▸ Setup")
+            out("  \(pad("Team ID", 18))\(s.teamID)")
+            out("  \(pad("Sertifikat", 18))\(s.displayName)")
+            out("  \(pad("Suffix Debug", 18))\(s.suffix)")
+            out("  \(pad("Ditulis", 18))\(s.localPath)")
             out("")
+        case let .failure(e):
+            out("▸ Setup DILEWATIN")
+            out("  \(e)")
+            out("")
+            out("  init-nya sendiri sukses. Beresin di atas, lalu: ezconfig setup")
+            out("")
+        case nil:
+            break
         }
         
+        // Closing
+        out(rule)
         if !o.hardcodedGroups.isEmpty {
             out("  ⚠︎  App Group masih ditulis literal di kode:")
             for h in o.hardcodedGroups {
@@ -304,24 +316,6 @@ enum Report {
             out("")
         }
         
-        switch o.setup {
-        case let .success(s):
-            out("▸ Setup")
-            out("  \(pad("Team ID", 18))\(s.teamID)")
-            out("  \(pad("Sertifikat", 18))\(s.displayName)")
-            out("  \(pad("Suffix Debug", 18))\(s.suffix)")
-            out("  \(pad("Ditulis", 18))\(s.localPath)")
-            out("")
-        case let .failure(e):
-            out("▸ Setup DILEWATIN")
-            out("  \(e)")
-            out("")
-            out("  init-nya sendiri sukses. Beresin di atas, lalu: ezconfig setup")
-            out("")
-        case nil:
-            break
-        }
-        
         if o.localConfigExists {
             out("  Beres. Buka project dan build buat verifikasi.")
             out("  Tim lo cukup: brew install revan/adac9/ezconfig && ezconfig setup")
@@ -350,6 +344,23 @@ enum Report {
             out("  \(pad("Sebelumnya", 18))\(prev)  → diganti")
         }
         out("")
+        
+        if !o.previews.isEmpty {
+            out("▸ Bundle ID")
+            var byConfig: [String: [(target: String, bundleID: String)]] = [:]
+            for p in o.previews {
+                byConfig[p.config, default: []].append((p.target, p.bundleID))
+            }
+            let width = o.previews.map(\.target.count).max() ?? 0
+
+            for config in byConfig.keys.sorted() {
+                out("  \(config)")
+                for row in (byConfig[config] ?? []).sorted(by: { $0.target < $1.target }) {
+                    out("    \(pad(row.target, width))  \(row.bundleID)")
+                }
+            }
+            out("")
+        }
         
         if !o.appGroupPreviews.isEmpty {
             out("▸ App Group")

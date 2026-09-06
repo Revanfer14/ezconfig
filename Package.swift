@@ -21,13 +21,21 @@ let package = Package(
         ),
     ],
     targets: [
-        .executableTarget(
-            name: "ezconfig",
+        .target(
+            name: "ezconfigKit",
             dependencies: [
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "XcodeProj", package: "XcodeProj"),
                 .product(name: "PathKit", package: "PathKit"),
             ]
+        ),
+            .executableTarget(
+                name: "ezconfig",
+                dependencies: ["ezconfigKit"]
+            ),
+        .testTarget(
+            name: "ezconfigTests",
+            dependencies: ["ezconfigKit"]
         ),
     ]
 )

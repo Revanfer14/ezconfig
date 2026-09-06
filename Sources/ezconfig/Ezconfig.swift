@@ -5,16 +5,13 @@
 //  Created by Revan Ferdinand on 03/09/26.
 //
 
-import Foundation
+
 import ArgumentParser
+import ezconfigKit
 
 @main
-struct Ezconfig: ParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "ezconfig",
-        abstract: "Automate multi-developer (with Individual Apple Membership Program) code signing for Xcode projects",
-        version: EzconfigVersion.current,
-        subcommands: [InitCommand.self, Setup.self, Check.self, Clean.self, Inspect.self],
-    )
-        
+struct EzconfigMain {
+    static func main() {
+        Ezconfig.main()
+    }
 }
