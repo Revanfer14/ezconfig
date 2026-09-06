@@ -12,45 +12,45 @@ enum PlanError: Error, CustomStringConvertible {
     case ambiguousAnchor([String])
     case anchorConflict(target: String, values: [String])
     case prefixLost(target: String)
-
+    
     var description: String {
         switch self {
         case .noSignableTarget:
             return "No target in this project has a PRODUCT_BUNDLE_IDENTIFIER."
-
+            
         case let .prefixLost(target):
             return """
             This project is already set up, but Configs/Base.xcconfig is missing.
-
+            
             Target '\(target)' points at $(BUNDLE_PREFIX), and that variable only
             lives in Base.xcconfig, so the prefix cannot be recovered from the
             project file alone.
-
+            
             Restore it:
               git checkout Configs/Base.xcconfig
             """
-
+            
         case let .noAnchor(names):
             return """
             No app target to take the bundle ID prefix from.
             Targets found: \(names.joined(separator: ", "))
-
+            
             Set it by hand: ezconfig init --prefix com.example.app
             """
-
+            
         case let .ambiguousAnchor(names):
             return """
             \(names.count) app targets found: \(names.joined(separator: ", "))
             ezconfig will not guess which one the prefix comes from.
-
+            
             Set it by hand: ezconfig init --prefix com.example.app
             """
-
+            
         case let .anchorConflict(target, values):
             return """
             Target '\(target)' has a different bundle ID per configuration:
               \(values.joined(separator: "\n  "))
-
+            
             Make them match in Xcode, or set the prefix by hand:
               ezconfig init --prefix <id>
             """
@@ -63,7 +63,13 @@ struct TargetPlan {
         case anchor
         case adopt(remainder: String)
         case alreadyAdopted
-        case skip(reason: String)
+        case skip(reason: String, kind: SkipKind)
+    }
+    
+    enum SkipKind {
+        case watchOutsidePrefix
+        case outsidePrefix
+        case other
     }
     
     let target: TargetInfo
@@ -476,7 +482,7 @@ private func resolvePrefix(
         all.filter { !$0.isVariable }
             .map { SuffixCleaner.cleanTrailing($0.value, suffixes: suffixes).value }
     )
-
+    
     switch literals.count {
     case 0:
         // Anchor ketemu tapi nilainya variabel semua: project udah pernah
@@ -525,7 +531,7 @@ private func decide(
     guard target.isSignable else {
         return TargetPlan(
             target: target,
-            decision: .skip(reason: "nggak punya bundle ID"),
+            decision: .skip(reason: "nggak punya bundle ID", kind: .other),
             currentBundleID: nil
         )
     }
@@ -576,13 +582,17 @@ private func decide(
     }
     
     guard outside.isEmpty else {
-        let reason = target.platform == .watchOS && target.isApp
+        let isWatchApp = target.platform == .watchOS && target.isApp
+        let reason = isWatchApp
             ? "watch app di luar prefix \(prefix)"
             : "di luar prefix \(prefix)"
 
         return TargetPlan(
             target: target,
-            decision: .skip(reason: reason),
+            decision: .skip(
+                reason: reason,
+                kind: isWatchApp ? .watchOutsidePrefix : .outsidePrefix
+            ),
             currentBundleID: Set(outside).sorted().joined(separator: " / ")
         )
     }
@@ -598,7 +608,7 @@ private func decide(
     guard remainders.count == 1 else {
         return TargetPlan(
             target: target,
-            decision: .skip(reason: "bundle ID beda antar konfigurasi"),
+            decision: .skip(reason: "bundle ID beda antar konfigurasi", kind: .other),
             currentBundleID: rawValues.sorted().joined(separator: " / ")
         )
     }

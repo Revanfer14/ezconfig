@@ -68,6 +68,7 @@ struct InitOutcome {
     struct Skipped {
         let target: String
         let reason: String
+        let kind: TargetPlan.SkipKind
         let bundleID: String?
         let blocksCheck: Bool
     }
@@ -150,6 +151,7 @@ struct ProjectWriter {
                 .init(
                     target: e.target.name,
                     reason: reasonText(e.decision),
+                    kind: skipKind(e.decision),
                     bundleID: e.currentBundleID,
                     blocksCheck: e.target.isSignable
                 )
@@ -273,8 +275,13 @@ struct ProjectWriter {
     }
     
     private func reasonText(_ d: TargetPlan.Decision) -> String {
-        if case let .skip(reason) = d { return reason }
+        if case let .skip(reason, _) = d { return reason }
         return "—"
+    }
+
+    private func skipKind(_ d: TargetPlan.Decision) -> TargetPlan.SkipKind {
+        if case let .skip(_, kind) = d { return kind }
+        return .other
     }
     
     private func edits(from plan: AdoptionPlan) -> [String: TargetEdits] {

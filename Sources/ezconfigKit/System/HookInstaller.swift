@@ -33,16 +33,16 @@ enum HookInstaller {
     private static func block(projectDir: String) -> String {
         """
         \(begin)
-        # Jangan diedit tangan — blok ini ditulis ulang tiap `ezconfig setup`.
-        # GUI client (Xcode, GitHub Desktop) jalan tanpa /opt/homebrew/bin di PATH.
-        # ezconfig 0.5 — nilai literal di target yang nggak diadopsi nggak diblokir.
+        # Do not edit by hand. This block is rewritten on every `ezconfig setup`.
+        # GUI clients (Xcode, GitHub Desktop) run without /opt/homebrew/bin on PATH.
+        # Literal values in targets ezconfig does not manage are not blocked here.
         PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
         if command -v ezconfig >/dev/null 2>&1; then
             ( cd "\(projectDir)" && ezconfig check --fix --staged ) || exit 1
         else
-            echo "ezconfig: BINARY NGGAK KETEMU — commit ini LOLOS TANPA PEMERIKSAAN." >&2
-            echo "  Identitas signing bisa ikut ke-commit tanpa ketauan." >&2
-            echo "  Pasang: brew install revan/adac9/ezconfig" >&2
+            echo "ezconfig: BINARY NOT FOUND. This commit passed WITHOUT any check." >&2
+            echo "  Signing identity may have been committed unnoticed." >&2
+            echo "  Install: brew install Revanfer14/adac9/ezconfig" >&2
         fi
         \(end)
         """
@@ -52,7 +52,7 @@ enum HookInstaller {
         var outcome = HookOutcome()
         
         guard Git.repoRoot(sourceRoot) != nil else {
-            outcome.reason = "bukan git repo"
+            outcome.reason = "not a git repository"
             return outcome
         }
         
@@ -67,7 +67,7 @@ enum HookInstaller {
             outcome.customHooksPath = custom.string
         } else {
             guard let gitDir = Git.gitDir(sourceRoot) else {
-                outcome.reason = "nggak nemu folder .git"
+                outcome.reason = "could not find the .git directory"
                 return outcome
             }
             hooksDir = gitDir + "hooks"
@@ -107,7 +107,7 @@ enum HookInstaller {
                   shebang.hasPrefix("#!"),
                   shebang.contains("sh")            // sh, bash, zsh, env sh
             else {
-                outcome.reason = "pre-commit yang ada bukan shell script"
+                outcome.reason = "the existing pre-commit hook is not a shell script"
                 return outcome
             }
             

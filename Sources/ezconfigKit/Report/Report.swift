@@ -239,7 +239,7 @@ enum Report {
         attention += suffixCleaningAttention(o.cleanings)
         attention += suspiciousAttention(o.suspicious)
         
-        let watchSkips = o.skipped.filter { $0.reason.hasPrefix("watch app di luar prefix") }
+        let watchSkips = o.skipped.filter { $0.kind == .watchOutsidePrefix }
         for w in watchSkips {
             attention.append([
                 "Watch app bundle ID does not match its parent app",
@@ -255,7 +255,7 @@ enum Report {
             ])
         }
         
-        let otherSkips = unmanaged.filter { !$0.reason.hasPrefix("watch app di luar prefix") }
+        let otherSkips = unmanaged.filter { $0.kind != .watchOutsidePrefix }
         if !otherSkips.isEmpty {
             var lines = [
                 "\(otherSkips.count) \(plural(otherSkips.count, "target")) is not managed by ezconfig",

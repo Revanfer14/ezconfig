@@ -38,23 +38,23 @@ enum KeychainError: Error, CustomStringConvertible {
         switch self {
         case .noCertificate:
             return """
-            Nggak nemu sertifikat 'Apple Development' di keychain.
-            Buka Xcode → Settings → Accounts, sign in pakai Apple ID lo,
-            lalu 'Manage Certificates' → '+' → 'Apple Development'.
+            No 'Apple Development' certificate found in your keychain.
+            Open Xcode, go to Settings > Accounts and sign in with your Apple ID,
+            then choose 'Manage Certificates' > '+' > 'Apple Development'.
             """
         case let .allExpired(list):
             let lines = list.map { "  \($0.teamID)  \($0.displayName)  (expired)" }
             return """
-            Semua sertifikat Apple Development udah expired:
+            Every Apple Development certificate in your keychain has expired:
             \(lines.joined(separator: "\n"))
-            Bikin yang baru lewat Xcode → Settings → Accounts → Manage Certificates.
+            Create a new one in Xcode: Settings > Accounts > Manage Certificates.
             """
         case let .ambiguous(list):
             let lines = list.map { "  \($0.teamID)  \($0.displayName)" }
             return """
-            Ada \(list.count) Team ID di keychain lo:
+            Your keychain holds \(list.count) Team IDs:
             \(lines.joined(separator: "\n"))
-            Tentuin yang mana: ezconfig setup --team <ID>
+            Pick one: ezconfig setup --team <ID>
             """
         }
     }
@@ -103,7 +103,7 @@ enum Keychain {
             // mungkin sertifikatnya di mesin lain. Build-nya yang bakal protes.
             return SigningIdentity(
                 teamID: override,
-                commonName: "(dari --team, nggak ada di keychain)",
+                commonName: "(from --team, not present in this keychain)",
                 expiresAt: nil
             )
         }
@@ -163,7 +163,7 @@ enum Keychain {
 
         return SigningIdentity(
             teamID: teamID,
-            commonName: commonName ?? "—",
+            commonName: commonName ?? "(unknown)",
             expiresAt: notAfter.flatMap(parseOpenSSLDate)
         )
     }

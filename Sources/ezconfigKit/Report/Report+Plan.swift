@@ -29,7 +29,7 @@ extension Report {
                 out("  ✓ \(name)  $(BUNDLE_PREFIX)\(remainder)")
             case .alreadyAdopted:
                 out("  · \(name)  udah pakai variabel")
-            case let .skip(reason):
+            case let .skip(reason, _):
                 out("  ✗ \(name)  DILEWATIN — \(reason)")
                 if let cur = e.currentBundleID {
                     out("    \(pad("", width))  sekarang: \(cur)")

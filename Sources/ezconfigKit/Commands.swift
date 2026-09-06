@@ -10,7 +10,7 @@ import Foundation
 import PathKit
 
 struct ProjectOptions: ParsableArguments {
-    @Option(name: .long, help: "Path ke folder project. Default: folder sekarang.")
+    @Option(name: .long, help: "Path to the project folder. Defaults to the current directory.")
     var path: String = FileManager.default.currentDirectoryPath
 }
 
@@ -24,34 +24,38 @@ extension Ezconfig {
 
         @OptionGroup var options: ProjectOptions
 
-        @Option(name: .long, help: "Paksa prefix bundle ID kanonik.")
+        @Option(name: .long, help: "Force a specific canonical bundle ID prefix.")
         var prefix: String?
 
-        @Flag(name: .long, help: "Cuma tampilkan rencana, jangan nulis apa-apa.")
+        @Flag(name: .long, help: "Show the plan without writing anything.")
         var dryRun = false
 
-        @Flag(name: .long, help: "Jalan walaupun Xcode lagi kebuka.")
+        @Flag(name: .long, help: "Run even if Xcode is open.")
         var force = false
 
-        @Flag(name: .long, help: "Jangan jalanin setup sesudah init.")
+        @Flag(name: .long, help: "Skip the setup step after init.")
         var noSetup = false
 
-        @Option(name: .long, help: "Team ID buat setup otomatis sesudah init.")
+        @Option(name: .long, help: "Team ID to use for the setup step after init.")
         var team: String?
 
         func run() throws {
             if !dryRun, !force, Xcode.isRunning {
                 throw ValidationError("""
-                Xcode lagi jalan.
+                Xcode is running.
 
-                Xcode nyimpen nilai build setting yang udah ke-resolve di memori.
-                Kalau dia buka project ini waktu `init` jalan, nilai lama bisa
-                ditulis balik sesudahnya, lengkap sama suffix lokal lo. Hasilnya
-                nggak keliatan salah: init sukses, check bersih, build jalan,
-                tapi Release bawa identitas lo.
+                Xcode keeps resolved build setting values in memory and can write
+                them back to the project file. `init` reads those values to work
+                out the canonical bundle prefix and stores it in Base.xcconfig,
+                which is committed and shared with everyone on the team.
 
-                Tutup Xcode dulu, lalu jalanin lagi.
-                Kalau project yang kebuka bukan yang ini: ezconfig init --force
+                Nothing checks Base.xcconfig afterwards. If it is built from
+                values Xcode is about to overwrite, the wrong prefix ships to
+                the whole team and no later command will catch it.
+
+                Close Xcode and run this again.
+                If the project Xcode has open is a different one, this is safe:
+                  ezconfig init --force
                 """)
             }
 
@@ -101,7 +105,7 @@ extension Ezconfig {
         
         @OptionGroup var options: ProjectOptions
         
-        @Option(name: .long, help: "Paksa pakai Team ID tertentu.")
+        @Option(name: .long, help: "Force a specific Team ID.")
         var team: String?
         
         func run() throws {
@@ -126,22 +130,24 @@ extension Ezconfig {
         
         @OptionGroup var options: ProjectOptions
         
-        @Flag(name: .long, help: "Langsung strip dan git add ulang kalau kotor.")
+        @Flag(name: .long, help: "Strip and re-stage the project when it is dirty.")
         var fix = false
-        
-        @Flag(name: .long, help: "Periksa staging area, bukan file di disk. Dipakai pre-commit hook.")
+
+        @Flag(name: .long, help: "Check the staging area instead of the file on disk. Used by the pre-commit hook.")
         var staged = false
-        
-        @Flag(name: .long, help: "Tolak juga nilai literal di target yang nggak diadopsi.")
+
+        @Flag(name: .long, help: "Also reject literal values in targets ezconfig does not manage.")
         var strict = false
         
         func validate() throws {
             guard !(fix && strict) else {
                 throw ValidationError("""
-                --strict nggak bisa dipasangin --fix.
-                --strict nolak nilai literal di target yang nggak diadopsi ezconfig,
-                dan nilai itu nggak punya template, jadi --fix nggak akan pernah bisa
-                nyembuhin. Pakai --strict sendirian buat audit, benerin manual di Xcode.
+                --strict cannot be combined with --fix.
+
+                --strict rejects literal values in targets ezconfig does not
+                manage. Those values have no template, so --fix can never repair
+                them. Use --strict on its own to audit, then fix them by hand
+                in Xcode.
                 """)
             }
         }
@@ -236,7 +242,7 @@ extension Ezconfig {
     struct Inspect: ParsableCommand {
         static let configuration = CommandConfiguration(
             commandName: "inspect",
-            abstract: "Baca .xcodeproj dan laporin isinya. Nggak nulis apa-apa."
+            abstract: "Read the .xcodeproj and report what is in it. Writes nothing."
         )
         
         @OptionGroup var options: ProjectOptions
@@ -255,8 +261,8 @@ extension Ezconfig {
                 )
                 Report.printPlan(plan)
             } catch {
-                print("▸ Rencana adopsi")
-                print("  Nggak bisa disusun:")
+                print("▸ Adoption plan")
+                print("  Could not be built:")
                 print("  \(error)")
                 print("")
             }
