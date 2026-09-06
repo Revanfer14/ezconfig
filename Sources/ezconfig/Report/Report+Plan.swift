@@ -37,6 +37,8 @@ extension Report {
             }
         }
         out("")
+        
+        printSuffixCleanings(plan.cleanings, suspicious: plan.suspicious)
 
         if !plan.companions.isEmpty {
             out("▸ Companion reference")

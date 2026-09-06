@@ -86,9 +86,13 @@ struct TargetInfo {
         return seen
     }
     
-    var literalCompanion: String? {
-        configs.compactMap(\.companionBundleID)
-            .first { !$0.isVariable }?.value
+    var companionValues: [String] {
+        var seen: [String] = []
+        for c in configs {
+            guard let v = c.companionBundleID?.value, !seen.contains(v) else { continue }
+            seen.append(v)
+        }
+        return seen
     }
     
     var legacyInfoPlist: String? {

@@ -103,6 +103,8 @@ enum Report {
         }
         out("")
         
+        printSuffixCleanings(o.cleanings, suspicious: o.suspicious)
+        
         if dryRun {
             out("▸ Dry run — nggak ada file yang ditulis")
             out("  bikin        \(o.baseConfigPath)")

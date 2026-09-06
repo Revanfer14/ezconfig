@@ -2,8 +2,6 @@
 //  AdoptionPlan.swift
 //  ezconfig
 //
-//  Created by Revan Ferdinand on 04/09/26.
-//
 
 import Foundation
 import PathKit
@@ -13,7 +11,7 @@ enum PlanError: Error, CustomStringConvertible {
     case noAnchor([String])
     case ambiguousAnchor([String])
     case anchorConflict(target: String, values: [String])
-    
+
     var description: String {
         switch self {
         case .noSignableTarget:
@@ -42,17 +40,16 @@ enum PlanError: Error, CustomStringConvertible {
 
 struct TargetPlan {
     enum Decision {
-        case anchor                        // sumber prefix, jadi $(BUNDLE_PREFIX)
-        case adopt(remainder: String)      // jadi $(BUNDLE_PREFIX)<remainder>
-        case alreadyAdopted                // udah pakai variabel
+        case anchor
+        case adopt(remainder: String)
+        case alreadyAdopted
         case skip(reason: String)
     }
-    
+
     let target: TargetInfo
     let decision: Decision
     let currentBundleID: String?
-    
-    // Nilai yang bakal ditulis ke .pbxproj.
+
     var template: String? {
         switch decision {
         case .anchor:                 return "$(BUNDLE_PREFIX)"
@@ -60,7 +57,7 @@ struct TargetPlan {
         case .alreadyAdopted, .skip:  return nil
         }
     }
-    
+
     var isAdopted: Bool {
         switch decision {
         case .anchor, .adopt: return true
@@ -71,25 +68,25 @@ struct TargetPlan {
 
 struct CompanionPlan {
     enum Site {
-        case buildSetting            // INFOPLIST_KEY_<key> di .pbxproj
-        case plistFile(String)       // path relatif ke Info.plist
+        case buildSetting
+        case plistFile(String)
     }
-    
+
     let target: String
     let site: Site
-    let key: String                  // WKCompanionAppBundleIdentifier
+    let key: String
     let from: String
-    let to: String?                  // nil = nggak bisa diturunkan dari prefix
-    
+    let to: String?
+
     var siteLabel: String {
         switch site {
         case .buildSetting:     return "build setting"
         case let .plistFile(p): return p
         }
     }
-    
+
     var settingKey: String { "INFOPLIST_KEY_" + key }
-    
+
     var isPlistFile: Bool {
         if case .plistFile = site { return true }
         return false
@@ -97,30 +94,52 @@ struct CompanionPlan {
 }
 
 struct AppGroupBinding {
-    let variable: String      // APP_GROUP_ID
-    let canonical: String     // group.com.revan.multitest
+    let variable: String
+    let canonical: String
 }
 
 struct EntitlementsPlan {
     let file: EntitlementsInfo
     let appGroupRewrites: [(from: String, to: String)]
     let keychainRewrites: [(from: String, to: String)]
-    
+
     var hasWork: Bool { !appGroupRewrites.isEmpty || !keychainRewrites.isEmpty }
     var blocked: Bool { file.exists && !file.isXML }
 }
 
+// Jejak suffix lokal yang kebuang. Dilaporin biar Lead sadar Xcode barusan
+// nyuntik identitas dia.
+struct SuffixCleaning {
+    let target: String        // "—" kalau bukan milik target tertentu
+    let site: String          // "bundle ID" / "companion" / "app group" / ...
+    let from: String
+    let to: String
+    let suffix: String
+}
+
+// Komponen yang bentuknya kayak suffix tapi nggak ada di himpunan yang dikenal.
+// Nggak di-strip — cuma dilaporin.
+struct SuspiciousSuffix {
+    let target: String
+    let site: String
+    let value: String
+    let component: String
+}
+
 struct AdoptionPlan {
     let canonicalPrefix: String
-    let prefixOrigin: String          // dari mana prefix-nya didapat
+    let prefixOrigin: String
     let entries: [TargetPlan]
     let entitlements: [EntitlementsInfo]
     let appGroups: [AppGroupBinding]
     let entitlementPlans: [EntitlementsPlan]
     let companions: [CompanionPlan]
     let legacyPlistInfos: [InfoPlistInfo]
-    
-    // Build setting per target: nama setting → nilai template.
+    let cleanings: [SuffixCleaning]
+    let suspicious: [SuspiciousSuffix]
+
+    static let token = "$(BUNDLE_PREFIX)"
+
     func companionSettings(for target: String) -> [String: String] {
         var map: [String: String] = [:]
         for c in companions where c.target == target && !c.isPlistFile {
@@ -128,11 +147,11 @@ struct AdoptionPlan {
         }
         return map
     }
-    
+
     var unresolvedCompanions: [CompanionPlan] {
         companions.filter { $0.to == nil }
     }
-    
+
     var adopted: [TargetPlan]  { entries.filter(\.isAdopted) }
     var skipped:  [TargetPlan] {
         entries.filter { if case .skip = $0.decision { return true }; return false }
@@ -142,31 +161,46 @@ struct AdoptionPlan {
             e.target.legacyInfoPlist.map { (e.target.name, $0) }
         }
     }
-    
+
     static func make(
         info: ProjectInfo,
-        overridePrefix: String? = nil
+        overridePrefix: String? = nil,
+        knownSuffixes: Set<String> = []
     ) throws -> AdoptionPlan {
-        
+
         let sourceRoot = Path(info.sourceRoot)
         let signable = info.targets.filter(\.isSignable)
         guard !signable.isEmpty else { throw PlanError.noSignableTarget }
-        
-        // 1. Tentuin prefix kanonik.
+
+        var cleanings: [SuffixCleaning] = []
+        var suspicious: [SuspiciousSuffix] = []
+
+        // 1. Prefix kanonik.
         let (prefix, origin) = try resolvePrefix(
             info: info,
             signable: signable,
             sourceRoot: sourceRoot,
-            override: overridePrefix
+            override: overridePrefix,
+            suffixes: knownSuffixes
         )
-        
-        // 2. Putusin nasib tiap target.
+
+        let anchors = [prefix, token]
+
+        // 2. Nasib tiap target.
         var entries: [TargetPlan] = []
         for target in info.targets {
-            entries.append(decide(target, prefix: prefix))
+            entries.append(
+                decide(
+                    target,
+                    prefix: prefix,
+                    suffixes: knownSuffixes,
+                    cleanings: &cleanings,
+                    suspicious: &suspicious
+                )
+            )
         }
-        
-        // 3. Entitlements: kumpulin file unik, susun binding App Group.
+
+        // 3. Entitlements.
         var seen: Set<String> = []
         var ents: [EntitlementsInfo] = []
         for target in info.targets {
@@ -175,49 +209,109 @@ struct AdoptionPlan {
                 ents.append(EntitlementsReader.read(rel, sourceRoot: sourceRoot))
             }
         }
-        
-        // Nilai kanonik yang udah kesimpen dari init sebelumnya menang —
-        // habis init pertama, entitlements isinya variabel, bukan literal lagi.
-        var bindings = BaseConfig.appGroups(
-            from: sourceRoot + "Configs" + "Base.xcconfig"
-        )
+
+        // Binding yang udah ada di Base.xcconfig bisa ikut tercemar kalau init
+        // buggy pernah jalan — bersihin duluan biar jadi acuan yang bener.
+        var bindings: [AppGroupBinding] = []
+        for b in BaseConfig.appGroups(from: sourceRoot + "Configs" + "Base.xcconfig") {
+            let c = SuffixCleaner.cleanTrailing(b.canonical, suffixes: knownSuffixes)
+            if let removed = c.removed {
+                cleanings.append(
+                    SuffixCleaning(
+                        target: "—",
+                        site: "Base.xcconfig / \(b.variable)",
+                        from: b.canonical, to: c.value, suffix: removed
+                    )
+                )
+            }
+            bindings.append(AppGroupBinding(variable: b.variable, canonical: c.value))
+        }
+
         var known = Set(bindings.map(\.canonical))
-        
-        for literal in ents.flatMap(\.literalAppGroups).sorted() where !known.contains(literal) {
+
+        // Literal apa adanya → nilai kanonik. Pembersihan HARUS sebelum dedup,
+        // kalau nggak `group.x.ns8wsvtkad` kedaftar jadi APP_GROUP_ID_2 palsu.
+        var groupCanonical: [String: String] = [:]
+        for literal in ents.flatMap(\.literalAppGroups).sorted() {
+            guard groupCanonical[literal] == nil else { continue }
+
+            let c = SuffixCleaner.cleanAppGroup(
+                literal,
+                knownCanonicals: bindings.map(\.canonical),
+                suffixes: knownSuffixes
+            )
+            groupCanonical[literal] = c.value
+
+            if let removed = c.removed {
+                cleanings.append(
+                    SuffixCleaning(
+                        target: "—", site: "app group",
+                        from: literal, to: c.value, suffix: removed
+                    )
+                )
+            }
+
+            guard !known.contains(c.value) else { continue }
             bindings.append(
                 AppGroupBinding(
                     variable: BaseConfig.variableName(index: bindings.count),
-                    canonical: literal
+                    canonical: c.value
                 )
             )
-            known.insert(literal)
+            known.insert(c.value)
         }
-        
+
         let byCanonical = Dictionary(
             bindings.map { ($0.canonical, $0.variable) },
             uniquingKeysWith: { a, _ in a }
         )
-        
+
         var entPlans: [EntitlementsPlan] = []
         for e in ents {
             var groups: [(from: String, to: String)] = []
             for g in e.literalAppGroups {
-                guard let variable = byCanonical[g] else { continue }
+                let canonical = groupCanonical[g] ?? g
+                guard let variable = byCanonical[canonical] else { continue }
                 groups.append((from: g, to: "$(\(variable))"))
             }
-            
+
             var keychains: [(from: String, to: String)] = []
             for k in e.literalKeychainGroups {
-                let tail = EntitlementsReader.tail(of: k)
-                guard tail.hasPrefix(prefix) else { continue }
+                let head = EntitlementsReader.head(of: k)
+                let rawTail = EntitlementsReader.tail(of: k)
+
+                // Udah diadopsi tapi ekornya tercemar:
+                // $(AppIdentifierPrefix)$(BUNDLE_PREFIX).ns8wsvtkad
+                if head.hasSuffix(token) {
+                    let c = SuffixCleaner.clean(rawTail, anchors: [""], suffixes: knownSuffixes)
+                    guard let removed = c.removed else { continue }
+                    cleanings.append(
+                        SuffixCleaning(
+                            target: "—", site: "keychain group",
+                            from: k, to: head + c.value, suffix: removed
+                        )
+                    )
+                    keychains.append((from: k, to: head + c.value))
+                    continue
+                }
+
+                let c = SuffixCleaner.clean(rawTail, anchors: [prefix], suffixes: knownSuffixes)
+                guard c.value.hasPrefix(prefix) else { continue }
+                if let removed = c.removed {
+                    cleanings.append(
+                        SuffixCleaning(
+                            target: "—", site: "keychain group",
+                            from: k, to: head + token + c.value.dropFirst(prefix.count),
+                            suffix: removed
+                        )
+                    )
+                }
                 keychains.append((
                     from: k,
-                    to: EntitlementsReader.head(of: k)
-                    + "$(BUNDLE_PREFIX)"
-                    + tail.dropFirst(prefix.count)
+                    to: head + token + c.value.dropFirst(prefix.count)
                 ))
             }
-            
+
             entPlans.append(
                 EntitlementsPlan(
                     file: e,
@@ -226,41 +320,37 @@ struct AdoptionPlan {
                 )
             )
         }
-        
-        // 4. Companion reference: build setting & Info.plist lama.
+
+        // 4. Companion reference.
         var companions: [CompanionPlan] = []
         var plistInfos: [InfoPlistInfo] = []
-        
+
         for target in info.targets {
-            if let literal = target.literalCompanion {
-                companions.append(
-                    CompanionPlan(
-                        target: target.name,
-                        site: .buildSetting,
-                        key: "WKCompanionAppBundleIdentifier",
-                        from: literal,
-                        to: derive(literal, prefix: prefix)
-                    )
-                )
+            for raw in target.companionValues {
+                guard let c = companionPlan(
+                    target: target.name, site: .buildSetting,
+                    key: "WKCompanionAppBundleIdentifier", raw: raw,
+                    prefix: prefix, anchors: anchors, suffixes: knownSuffixes,
+                    cleanings: &cleanings, suspicious: &suspicious
+                ) else { continue }
+                companions.append(c)
             }
-            
+
             guard let rel = target.legacyInfoPlist else { continue }
             let plist = InfoPlistReader.read(rel, sourceRoot: sourceRoot)
             plistInfos.append(plist)
-            
-            for c in plist.literalCompanions {
-                companions.append(
-                    CompanionPlan(
-                        target: target.name,
-                        site: .plistFile(rel),
-                        key: c.key,
-                        from: c.value,
-                        to: derive(c.value, prefix: prefix)
-                    )
-                )
+
+            for entry in plist.companions {
+                guard let c = companionPlan(
+                    target: target.name, site: .plistFile(rel),
+                    key: entry.key, raw: entry.value,
+                    prefix: prefix, anchors: anchors, suffixes: knownSuffixes,
+                    cleanings: &cleanings, suspicious: &suspicious
+                ) else { continue }
+                companions.append(c)
             }
         }
-        
+
         return AdoptionPlan(
             canonicalPrefix: prefix,
             prefixOrigin: origin,
@@ -270,14 +360,56 @@ struct AdoptionPlan {
             entitlementPlans: entPlans,
             companions: companions,
             legacyPlistInfos: plistInfos,
+            cleanings: cleanings,
+            suspicious: suspicious
         )
     }
-    
-    // Aturannya sama persis kayak bundle ID target: cukup hasPrefix.
+
     static func derive(_ value: String, prefix: String) -> String? {
+        if value.hasPrefix(token) { return value }
         guard value.hasPrefix(prefix) else { return nil }
-        return "$(BUNDLE_PREFIX)" + value.dropFirst(prefix.count)
+        return token + value.dropFirst(prefix.count)
     }
+}
+
+// Companion cuma masuk rencana kalau emang ada yang perlu digarap:
+// nilainya literal, atau bentuk variabel tapi tercemar suffix.
+private func companionPlan(
+    target: String,
+    site: CompanionPlan.Site,
+    key: String,
+    raw: String,
+    prefix: String,
+    anchors: [String],
+    suffixes: Set<String>,
+    cleanings: inout [SuffixCleaning],
+    suspicious: inout [SuspiciousSuffix]
+) -> CompanionPlan? {
+
+    let c = SuffixCleaner.clean(raw, anchors: anchors, suffixes: suffixes)
+    let isLiteral = !raw.contains("$(") && !raw.contains("${")
+    guard c.didClean || isLiteral else { return nil }
+
+    if let removed = c.removed {
+        cleanings.append(
+            SuffixCleaning(
+                target: target, site: "companion",
+                from: raw, to: AdoptionPlan.derive(c.value, prefix: prefix) ?? c.value,
+                suffix: removed
+            )
+        )
+    }
+
+    let to = AdoptionPlan.derive(c.value, prefix: prefix)
+    if let to, let s = SuffixCleaner.suspiciousComponent(
+        in: String(to.dropFirst(AdoptionPlan.token.count))
+    ) {
+        suspicious.append(
+            SuspiciousSuffix(target: target, site: "companion", value: raw, component: s)
+        )
+    }
+
+    return CompanionPlan(target: target, site: site, key: key, from: raw, to: to)
 }
 
 // Urutan: --prefix  →  Base.xcconfig  →  target aplikasi.
@@ -285,39 +417,40 @@ private func resolvePrefix(
     info: ProjectInfo,
     signable: [TargetInfo],
     sourceRoot: Path,
-    override: String?
+    override: String?,
+    suffixes: Set<String>
 ) throws -> (String, String) {
-    
+
     if let override {
         return (override, "--prefix")
     }
-    
+
     let base = sourceRoot + "Configs" + "Base.xcconfig"
     if base.exists, let existing = try? LocalConfig.canonicalPrefix(from: base) {
         return (existing, "Configs/Base.xcconfig")
     }
-    
-    // Anchor = target .application non-watchOS. Watch app punya productType
-    // yang sama persis, jadi platform yang mbedain.
+
     var apps = signable.filter { $0.isApp && $0.platform != .watchOS }
     if apps.isEmpty {
-        apps = signable.filter(\.isApp)   // project watchOS-only
+        apps = signable.filter(\.isApp)
     }
-    
+
     guard !apps.isEmpty else {
         throw PlanError.noAnchor(signable.map(\.name))
     }
     guard apps.count == 1 else {
         throw PlanError.ambiguousAnchor(apps.map(\.name))
     }
-    
+
     let anchor = apps[0]
+    // Base.xcconfig nggak ada tapi Local.xcconfig ada → anchor-nya sendiri
+    // bisa tercemar. Suffix app selalu di ekor.
     let literals = Set(
         anchor.configs.compactMap(\.bundleID)
             .filter { !$0.isVariable }
-            .map(\.value)
+            .map { SuffixCleaner.cleanTrailing($0.value, suffixes: suffixes).value }
     )
-    
+
     switch literals.count {
     case 0:
         throw PlanError.noAnchor([anchor.name])
@@ -331,7 +464,33 @@ private func resolvePrefix(
     }
 }
 
-private func decide(_ target: TargetInfo, prefix: String) -> TargetPlan {
+private enum Normalized {
+    case derived(String)     // remainder relatif prefix
+    case foreign             // variabel orang lain — jangan disentuh
+    case outside(String)     // literal di luar prefix
+}
+
+private func normalize(_ value: String, prefix: String) -> Normalized {
+    if value.hasPrefix(AdoptionPlan.token) {
+        return .derived(String(value.dropFirst(AdoptionPlan.token.count)))
+    }
+    if value.hasPrefix(prefix) {
+        return .derived(String(value.dropFirst(prefix.count)))
+    }
+    if value.contains("$(") || value.contains("${") {
+        return .foreign
+    }
+    return .outside(value)
+}
+
+private func decide(
+    _ target: TargetInfo,
+    prefix: String,
+    suffixes: Set<String>,
+    cleanings: inout [SuffixCleaning],
+    suspicious: inout [SuspiciousSuffix]
+) -> TargetPlan {
+
     guard target.isSignable else {
         return TargetPlan(
             target: target,
@@ -339,41 +498,88 @@ private func decide(_ target: TargetInfo, prefix: String) -> TargetPlan {
             currentBundleID: nil
         )
     }
-    
-    let values = target.configs.compactMap(\.bundleID)
-    let literals = Set(values.filter { !$0.isVariable }.map(\.value))
-    
-    if literals.isEmpty {
-        return TargetPlan(
-            target: target,
-            decision: .alreadyAdopted,
-            currentBundleID: values.first?.value
-        )
+
+    let anchors = [prefix, AdoptionPlan.token]
+
+    var rawValues: [String] = []
+    var remainders: Set<String> = []
+    var outside: [String] = []
+    var didClean = false
+    var sawForeign = false
+
+    for v in target.configs.compactMap(\.bundleID) {
+        guard !rawValues.contains(v.value) else { continue }
+        rawValues.append(v.value)
+
+        let c = SuffixCleaner.clean(v.value, anchors: anchors, suffixes: suffixes)
+        if let removed = c.removed {
+            didClean = true
+            cleanings.append(
+                SuffixCleaning(
+                    target: target.name, site: "bundle ID",
+                    from: v.value,
+                    to: AdoptionPlan.derive(c.value, prefix: prefix) ?? c.value,
+                    suffix: removed
+                )
+            )
+        }
+
+        switch normalize(c.value, prefix: prefix) {
+        case let .derived(remainder):
+            remainders.insert(remainder)
+            if let s = SuffixCleaner.suspiciousComponent(in: remainder) {
+                suspicious.append(
+                    SuspiciousSuffix(
+                        target: target.name, site: "bundle ID",
+                        value: v.value, component: s
+                    )
+                )
+            }
+        case .foreign:
+            sawForeign = true
+        case let .outside(literal):
+            outside.append(literal)
+        }
     }
-    
-    guard literals.count == 1 else {
-        return TargetPlan(
-            target: target,
-            decision: .skip(reason: "bundle ID beda antar konfigurasi"),
-            currentBundleID: literals.sorted().joined(separator: " / ")
-        )
-    }
-    
-    let bid = literals.first!
-    
-    guard bid.hasPrefix(prefix) else {
+
+    guard outside.isEmpty else {
         return TargetPlan(
             target: target,
             decision: .skip(reason: "di luar prefix \(prefix)"),
-            currentBundleID: bid
+            currentBundleID: Set(outside).sorted().joined(separator: " / ")
         )
     }
-    
-    let remainder = String(bid.dropFirst(prefix.count))
+
+    if remainders.isEmpty && sawForeign {
+        return TargetPlan(
+            target: target,
+            decision: .alreadyAdopted,
+            currentBundleID: rawValues.first
+        )
+    }
+
+    guard remainders.count == 1 else {
+        return TargetPlan(
+            target: target,
+            decision: .skip(reason: "bundle ID beda antar konfigurasi"),
+            currentBundleID: rawValues.sorted().joined(separator: " / ")
+        )
+    }
+
+    // Nilai udah bentuk variabel, seragam, dan nggak ada yang dibersihin →
+    // biarin. Ini yang bikin `init` idempoten dan output-nya stabil.
+    if !didClean, rawValues.count == 1, rawValues[0].hasPrefix(AdoptionPlan.token) {
+        return TargetPlan(
+            target: target,
+            decision: .alreadyAdopted,
+            currentBundleID: rawValues[0]
+        )
+    }
+
+    let remainder = remainders.first!
     return TargetPlan(
         target: target,
         decision: remainder.isEmpty ? .anchor : .adopt(remainder: remainder),
-        currentBundleID: bid
+        currentBundleID: rawValues.sorted().joined(separator: " / ")
     )
 }
-

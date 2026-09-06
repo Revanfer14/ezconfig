@@ -89,6 +89,8 @@ struct InitOutcome {
     var entitlementEdits: [(path: String, appGroups: Int, keychains: Int)] = []
     var entitlementFailures: [(path: String, reason: String)] = []
     var hardcodedGroups: [(group: String, files: [String])] = []
+    var cleanings: [SuffixCleaning] = []
+    var suspicious: [SuspiciousSuffix] = []
 }
 
 struct TargetEdits {
@@ -112,7 +114,11 @@ struct ProjectWriter {
     // Buka file dua kali — utang teknis yang dibayar di Fase 6.
     private func plan(overridePrefix: String?) throws -> AdoptionPlan {
         let info = try ProjectReader.read(projectPath.string)
-        return try AdoptionPlan.make(info: info, overridePrefix: overridePrefix)
+        return try AdoptionPlan.make(
+            info: info,
+            overridePrefix: overridePrefix,
+            knownSuffixes: LocalConfig.knownSuffixes(sourceRoot: sourceRoot)
+        )
     }
     
     func runInit(overridePrefix: String?, dryRun: Bool) throws -> InitOutcome {
@@ -125,6 +131,8 @@ struct ProjectWriter {
         let plan = try plan(overridePrefix: overridePrefix)
         outcome.canonicalPrefix = plan.canonicalPrefix
         outcome.prefixOrigin = plan.prefixOrigin
+        outcome.cleanings = plan.cleanings
+        outcome.suspicious = plan.suspicious
         
         for c in plan.unresolvedCompanions {
             outcome.companionUnresolved.append((c.target, c.siteLabel, c.from))
@@ -338,7 +346,7 @@ struct ProjectWriter {
 
             if let template = edits.bundleIDTemplate,
                let value = config.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] as? String,
-               !value.contains("$("), !value.contains("${") {
+               Self.unquote(value) != template {
                 config.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] = template
                 outcome.bundleIDsRewritten += 1
                 touched = true
@@ -346,7 +354,7 @@ struct ProjectWriter {
 
             for (key, template) in edits.settings {
                 guard let value = config.buildSettings[key] as? String,
-                      !value.contains("$("), !value.contains("${") else { continue }
+                      Self.unquote(value) != template else { continue }
                 config.buildSettings[key] = template
                 outcome.companionsRewritten += 1
                 touched = true
@@ -381,6 +389,13 @@ struct ProjectWriter {
                 outcome.provisioningRemoved += 1
             }
         }
+    }
+    
+    // XcodeProj kadang nyimpen nilai lengkap sama kutipnya.
+    private static func unquote(_ s: String) -> String {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard t.count >= 2, t.hasPrefix("\""), t.hasSuffix("\"") else { return t }
+        return String(t.dropFirst().dropLast())
     }
     
     private func rewritePlists(_ plan: AdoptionPlan, into outcome: inout InitOutcome) {

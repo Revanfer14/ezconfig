@@ -64,6 +64,7 @@ extension Report {
             if o.attributeTeamsRemoved > 0 { parts.append("\(o.attributeTeamsRemoved) TargetAttributes") }
             if o.provisioningRemoved > 0 { parts.append("\(o.provisioningRemoved) PROVISIONING_PROFILE*") }
             if o.bundleIDsRewritten > 0 { parts.append("\(o.bundleIDsRewritten) bundle ID → $(BUNDLE_PREFIX)") }
+            if o.companionsRewritten > 0 { parts.append("\(o.companionsRewritten) companion → $(BUNDLE_PREFIX)") }
             Swift.print("ezconfig: signing identity dibersihin — \(parts.joined(separator: ", ")).", to: &err)
         }
 
@@ -88,18 +89,43 @@ extension Report {
 
     static func printCheck(_ findings: [Finding], projectName: String, source: CheckContext.Source) {
         var err = StdErr()
+
+        let leaks = findings.filter(\.isSuffixLeak)
+        let literals = findings.filter { !$0.isSuffixLeak }
         let noun = findings.count == 1 ? "value" : "values"
 
-        // Baris pertama HARUS berdiri sendiri — GitHub Desktop motong sisanya.
-        Swift.print("ezconfig: \(findings.count) literal signing \(noun) in \(projectName) [\(source.label)] — commit blocked.", to: &err)
+        // Baris pertama HARUS berdiri sendiri, GitHub Desktop motong sisanya.
+        Swift.print(
+            "ezconfig: \(findings.count) signing \(noun) in \(projectName) [\(source.label)], commit blocked.",
+            to: &err
+        )
         Swift.print("", to: &err)
 
         let width = findings.map(\.key.label.count).max() ?? 0
-        for f in findings {
-            Swift.print("  line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)", to: &err)
+
+        if !literals.isEmpty {
+            Swift.print("  Nilai literal:", to: &err)
+            for f in literals {
+                Swift.print("    line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)", to: &err)
+            }
+            Swift.print("", to: &err)
         }
 
-        Swift.print("", to: &err)
+        if !leaks.isEmpty {
+            Swift.print("  Suffix lokal ikut kebawa di nilai variabel:", to: &err)
+            for f in leaks {
+                Swift.print("    line \(padLeft(String(f.line), 5))  \(padRight(f.key.label, width))  \(f.value)", to: &err)
+                if let s = f.suffix {
+                    Swift.print("    \(padRight("", 5 + 8))\(padRight("", width))  ↑ '\(s)' itu suffix lokal", to: &err)
+                }
+            }
+            Swift.print("", to: &err)
+            Swift.print("  Nilainya keliatan bener karena diawali $(, tapi Xcode nyuntik", to: &err)
+            Swift.print("  suffix mesin lo ke dalamnya. Kalau ini ke-commit, developer lain", to: &err)
+            Swift.print("  dapet bundle ID yang nggak nyambung, dan Release bawa identitas lo.", to: &err)
+            Swift.print("", to: &err)
+        }
+
         Swift.print("  Fix: ezconfig check --fix", to: &err)
         Swift.print("", to: &err)
     }

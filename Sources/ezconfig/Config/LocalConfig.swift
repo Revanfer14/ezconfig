@@ -12,7 +12,7 @@ enum SetupError: Error, CustomStringConvertible {
     case notInitialized(String)
     case noBundlePrefix(String)
     case unusableTeamID(String)
-
+    
     var description: String {
         switch self {
         case let .notInitialized(path):
@@ -47,7 +47,7 @@ struct SetupOutcome {
 }
 
 enum LocalConfig {
-
+    
     // Team ID → suffix bundle ID. Deterministik, huruf kecil semua.
     static func suffix(for teamID: String) throws -> String {
         let cleaned = teamID.lowercased().filter { $0.isLetter || $0.isNumber }
@@ -56,7 +56,7 @@ enum LocalConfig {
         }
         return first.isNumber ? ".t\(cleaned)" : ".\(cleaned)"
     }
-
+    
     // Baca `BUNDLE_PREFIX` dari Base.xcconfig, buang `$(LOCAL_SUFFIX)`-nya.
     static func canonicalPrefix(from base: Path) throws -> String {
         let text: String = try base.read()
@@ -72,7 +72,7 @@ enum LocalConfig {
         }
         throw SetupError.noBundlePrefix(base.string)
     }
-
+    
     // Team ID yang kesimpen di Local.xcconfig sebelumnya, kalau ada.
     static func existingTeamID(at path: Path) -> String? {
         guard path.exists, let text: String = try? path.read() else { return nil }
@@ -86,36 +86,56 @@ enum LocalConfig {
         }
         return nil
     }
-
+    
+    static func existingSuffix(at path: Path) -> String? {
+        guard path.exists else { return nil }
+        let v = BaseConfig.values(from: path)["LOCAL_SUFFIX"]?
+            .trimmingCharacters(in: .whitespaces)
+        guard let v, !v.isEmpty else { return nil }
+        return v
+    }
+    
+    static func knownSuffixes(sourceRoot: Path) -> Set<String> {
+        var out: Set<String> = []
+        
+        if let s = existingSuffix(at: sourceRoot + "Configs" + "Local.xcconfig") {
+            out.insert(s)
+        }
+        for identity in (try? Keychain.identities()) ?? [] {
+            if let s = try? suffix(for: identity.teamID) { out.insert(s) }
+        }
+        return out
+    }
+    
     static func run(
         sourceRoot: Path,
         projectPath: String,
         identity: SigningIdentity
     ) throws -> SetupOutcome {
-
+        
         var outcome = SetupOutcome()
         outcome.teamID = identity.teamID
         outcome.displayName = identity.displayName
-
+        
         let configsDir = sourceRoot + "Configs"
         let basePath = configsDir + "Base.xcconfig"
         let localPath = configsDir + "Local.xcconfig"
         outcome.localPath = "Configs/Local.xcconfig"
-
+        
         guard basePath.exists else {
             throw SetupError.notInitialized("Configs/Base.xcconfig")
         }
-
+        
         let prefix = try canonicalPrefix(from: basePath)
         let sfx = try suffix(for: identity.teamID)
         outcome.canonicalPrefix = prefix
         outcome.suffix = sfx
         outcome.previousTeamID = existingTeamID(at: localPath)
-
+        
         try XcconfigTemplate
             .local(teamID: identity.teamID, suffix: sfx)
             .write(toFile: localPath.string, atomically: true, encoding: .utf8)
-
+        
         // Preview: substitusi $(BUNDLE_PREFIX) pakai nilai yang baru ditulis.
         let info = try ProjectReader.read(projectPath)
         for target in info.targets where target.isSignable {
