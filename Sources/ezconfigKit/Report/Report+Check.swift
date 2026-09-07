@@ -156,6 +156,39 @@ extension Report {
         emit("")
     }
     
+    static func printDrift(
+        _ findings: [Finding],
+        context: CheckPolicy.DriftContext?,
+        projectName: String,
+        toStdout: Bool
+    ) {
+        guard let context, !findings.isEmpty else { return }
+        let emit = emitter(toStdout: toStdout)
+        let width = findings.map(\.key.label.count).max() ?? 0
+
+        // Baris pertama HARUS berdiri sendiri, GitHub Desktop motong sisanya.
+        emit("ezconfig: Configs/Base.xcconfig has the wrong prefix, commit blocked.")
+        emit("")
+        emit("  BUNDLE_PREFIX   \(context.expectedPrefix)")
+        emit("  Anchor target   \(context.anchorName)")
+        emit("")
+        for f in findings { emit(findingLine(f, width: width)) }
+        emit("")
+        emit("  The prefix in Configs/Base.xcconfig was taken from that target, and")
+        emit("  Base.xcconfig is committed, so the whole team builds against it. A")
+        emit("  value that no longer matches means the stored prefix is wrong for")
+        emit("  everyone, not just for this target.")
+        emit("")
+        emit("  --fix cannot repair this. It would write $(BUNDLE_PREFIX) over the")
+        emit("  value and change the bundle ID without telling you.")
+        emit("")
+        emit("  Two ways out:")
+        emit("    If the prefix is right, fix the bundle ID in Xcode.")
+        emit("    If the bundle ID is right, close Xcode and run:")
+        emit("      ezconfig init --prefix <id>")
+        emit("")
+    }
+
     static func printDangling(_ audit: ConfigAudit, toStdout: Bool) {
         guard !audit.dangling.isEmpty else { return }
         let emit = emitter(toStdout: toStdout)

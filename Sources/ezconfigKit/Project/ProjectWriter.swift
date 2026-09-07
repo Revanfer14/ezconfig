@@ -5,6 +5,7 @@
 //  Created by Revan Ferdinand on 03/09/26.
 //
 
+import CryptoKit
 import Foundation
 import PathKit
 import XcodeProj
@@ -28,6 +29,21 @@ enum InitError: Error, CustomStringConvertible {
             return "This project has no root group. The file structure is not what Xcode normally writes."
         }
     }}
+
+enum WriteError: Error, CustomStringConvertible {
+    case projectChanged
+
+    var description: String {
+        """
+        The project file changed while ezconfig was running.
+
+        Most likely Xcode wrote to project.pbxproj in the background.
+        Nothing was written, the project is untouched.
+
+        Run the command again.
+        """
+    }
+}
 
 enum StripError: Error, CustomStringConvertible {
     case notInitialized
@@ -113,13 +129,31 @@ struct ProjectWriter {
     let projectPath: Path      // .../MultiTest.xcodeproj
     let sourceRoot: Path       // folder induknya
     private let xcodeproj: XcodeProj
-    
+    private let pbxprojPath: Path
+    private let pbxprojDigest: SHA256Digest
+
     init(projectPath: Path) throws {
         self.projectPath = projectPath
         self.sourceRoot = projectPath.parent()
         self.xcodeproj = try XcodeProj(path: projectPath)
+        self.pbxprojPath = projectPath + "project.pbxproj"
+        self.pbxprojDigest = try Self.digest(of: pbxprojPath)
     }
-    
+
+    private static func digest(of path: Path) throws -> SHA256Digest {
+        SHA256.hash(data: try path.read())
+    }
+
+    // Ketauan berubah kalau file-nya nggak kebaca sama sekali juga, bukan
+    // cuma kalau isinya beda. Xcode bisa nulis pas file lagi dibaca.
+    private func assertUnchanged() throws {
+        guard let current = try? Self.digest(of: pbxprojPath),
+              current == pbxprojDigest
+        else {
+            throw WriteError.projectChanged
+        }
+    }
+
     // Plan disusun dari pembacaan terpisah lewat ProjectReader.
     // Buka file dua kali — utang teknis yang dibayar di Fase 6.
     private func plan(overridePrefix: String?) throws -> AdoptionPlan {
@@ -139,6 +173,7 @@ struct ProjectWriter {
         }
         
         let plan = try plan(overridePrefix: overridePrefix)
+        if !dryRun { try assertUnchanged() }
         outcome.canonicalPrefix = plan.canonicalPrefix
         outcome.prefixOrigin = plan.prefixOrigin
         outcome.cleanings = plan.cleanings
@@ -265,8 +300,9 @@ struct ProjectWriter {
         
         // 3. Level project.
         stripProjectLevel(into: &outcome.strip)
-        
+
         // 4. Tulis balik.
+        try assertUnchanged()
         try xcodeproj.write(path: projectPath)
         rewritePlists(plan, into: &outcome)
         rewriteEntitlements(plan, into: &outcome)
@@ -341,11 +377,11 @@ struct ProjectWriter {
             throw StripError.notInitialized
         }
         
-        let editsByTarget = (try? plan(overridePrefix: nil)).map { edits(from: $0) } ?? [:]
-        
+        let editsByTarget = edits(from: try plan(overridePrefix: nil))
+
         var outcome = StripOutcome()
         stripProjectLevel(into: &outcome)
-        
+
         for target in xcodeproj.pbxproj.nativeTargets.sorted(by: { $0.name < $1.name }) {
             stripTarget(
                 target,
@@ -353,9 +389,10 @@ struct ProjectWriter {
                 into: &outcome
             )
         }
-        
+
         guard !outcome.isEmpty else { return outcome }
-        
+
+        try assertUnchanged()
         try xcodeproj.write(path: projectPath)
         return outcome
     }

@@ -174,6 +174,16 @@ extension Ezconfig {
                 projectPath: ctx.projectPath.string
             )
             
+            guard split.drift.isEmpty else {
+                Report.printDrift(
+                    split.drift,
+                    context: allow.driftContext,
+                    projectName: ctx.projectName,
+                    toStdout: !staged
+                )
+                throw ExitCode.failure
+            }
+
             guard split.unlinked.isEmpty else {
                 Report.printUnlinked(
                     split.unlinked,

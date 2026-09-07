@@ -12,17 +12,25 @@ enum CheckPolicy {
     
     // Dua himpunan, bukan satu, karena artinya beda jauh dan `--strict`
     // cuma boleh nyentuh yang pertama.
+    struct DriftContext {
+        let anchorName: String
+        let expectedPrefix: String
+    }
+
     struct Allowlist {
         var outsidePrefix: Set<String> = []   // target di luar prefix, sengaja
         var unfixable: Set<String> = []       // suffix nggak dikenal, ezconfig nolak nebak
         var unlinked: Set<String> = []        // target belum nunjuk Base.xcconfig
+        var drift: Set<String> = []           // anchor keluar dari prefix sendiri
+        var driftContext: DriftContext?
     }
-    
+
     struct Split {
         var blocking: [Finding] = []
         var tolerated: [Finding] = []
         var unfixable: [Finding] = []
         var unlinked: [Finding] = []
+        var drift: [Finding] = []
     }
     
     static func allowlist(projectPath: String) -> Allowlist {
@@ -35,13 +43,29 @@ enum CheckPolicy {
         else { return Allowlist() }
         
         var out = Allowlist()
-        
+
+        // Kumpulin drift duluan, karena nilainya harus dikeluarin dari
+        // outsidePrefix. Kalau ke-tolerate, prefix salah lolos ke commit.
+        var driftValues: Set<String> = []
+        if let d = plan.anchorDrift, let current = d.currentBundleID {
+            for part in current.components(separatedBy: " / ") {
+                let v = part.trimmingCharacters(in: .whitespaces)
+                if !v.isEmpty { driftValues.insert(v) }
+            }
+            out.driftContext = DriftContext(
+                anchorName: d.target.name,
+                expectedPrefix: plan.canonicalPrefix
+            )
+        }
+        out.drift = driftValues
+
         for e in plan.skipped {
             guard let current = e.currentBundleID else { continue }
             // currentBundleID bisa gabungan "a / b" waktu beda antar konfigurasi.
             for part in current.components(separatedBy: " / ") {
                 let v = part.trimmingCharacters(in: .whitespaces)
-                if !v.isEmpty { out.outsidePrefix.insert(v) }
+                guard !v.isEmpty, !driftValues.contains(v) else { continue }
+                out.outsidePrefix.insert(v)
             }
         }
         
@@ -90,7 +114,9 @@ enum CheckPolicy {
                 s.blocking.append(f)
 
             case .bundleID, .companionBundleID:
-                if allowlist.outsidePrefix.contains(f.value) {
+                if allowlist.drift.contains(f.value) {
+                    s.drift.append(f)
+                } else if allowlist.outsidePrefix.contains(f.value) {
                     s.tolerated.append(f)
                 } else if allowlist.unlinked.contains(f.value) {
                     s.unlinked.append(f)

@@ -1,3 +1,5 @@
+import Foundation
+import PathKit
 import Testing
 @testable import ezconfigKit
 
@@ -262,5 +264,94 @@ struct UnlinkedRouting {
 
         let f = Finding(key: .developmentTeam, kind: .literal, value: "ABCDE12345", line: 1)
         #expect(CheckPolicy.split([f], allowlist: allow).blocking.count == 1)
+    }
+}
+
+private func withTempRoot(_ body: (Path) throws -> Void) throws {
+    let root = Path(NSTemporaryDirectory()) + "ezconfig-writer-\(UUID().uuidString)"
+    try root.mkpath()
+    defer { try? root.delete() }
+    try body(root)
+}
+
+private func mutate(_ pbxprojPath: Path) throws {
+    let text: String = try pbxprojPath.read()
+    try pbxprojPath.write(text + "\n")
+}
+
+@Suite("ProjectWriter menolak nulis pas project.pbxproj berubah di bawahnya")
+struct ProjectWriterDigestGuard {
+
+    @Test("runStrip nolak kalau file berubah setelah writer dibikin")
+    func runStripDetectsChange() throws {
+        try withTempRoot { root in
+            let projectPath = try MinimalProject.materialize(in: root)
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            try mutate(projectPath + "project.pbxproj")
+
+            let before = try (projectPath + "project.pbxproj").read() as String
+            #expect(throws: WriteError.self) { try writer.runStrip() }
+            let after = try (projectPath + "project.pbxproj").read() as String
+            #expect(before == after)
+        }
+    }
+
+    @Test("runInit nolak sebelum Base.xcconfig ditulis")
+    func runInitAbortsBeforeBaseConfigWrite() throws {
+        try withTempRoot { root in
+            let projectPath = try MinimalProject.materialize(in: root, withBaseConfig: false)
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            try mutate(projectPath + "project.pbxproj")
+
+            #expect(throws: WriteError.self) {
+                try writer.runInit(overridePrefix: nil, dryRun: false)
+            }
+            #expect(!(root + "Configs" + "Base.xcconfig").exists)
+        }
+    }
+
+    @Test("runInit --dry-run nggak kepengaruh, nggak nulis apa-apa")
+    func runInitDryRunIgnoresChange() throws {
+        try withTempRoot { root in
+            let projectPath = try MinimalProject.materialize(in: root, withBaseConfig: false)
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            try mutate(projectPath + "project.pbxproj")
+
+            #expect(throws: Never.self) {
+                try writer.runInit(overridePrefix: nil, dryRun: true)
+            }
+            #expect(!(root + "Configs" + "Base.xcconfig").exists)
+        }
+    }
+
+    @Test("fixture yang nggak disentuh tetap strip normal")
+    func untouchedFixtureStripsNormally() throws {
+        try withTempRoot { root in
+            let projectPath = try MinimalProject.materialize(in: root)
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            let outcome = try writer.runStrip()
+            #expect(outcome.teamsRemoved == 2)
+            #expect(outcome.bundleIDsRewritten == 2)
+        }
+    }
+
+    @Test("plan(_:) gagal di runStrip nyebar, bukan strip separuh jadi")
+    func runStripPropagatesPlanFailure() throws {
+        try withTempRoot { root in
+            let projectPath = try MinimalProject.materialize(in: root, templated: true)
+            try (root + "Configs" + "Base.xcconfig").write("// tanpa BUNDLE_PREFIX\n")
+
+            let writer = try ProjectWriter(projectPath: projectPath)
+            let before = try (projectPath + "project.pbxproj").read() as String
+
+            #expect(throws: PlanError.self) { try writer.runStrip() }
+
+            let after = try (projectPath + "project.pbxproj").read() as String
+            #expect(before == after)
+        }
     }
 }

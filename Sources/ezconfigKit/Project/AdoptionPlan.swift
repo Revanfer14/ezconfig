@@ -156,6 +156,7 @@ struct SuspiciousSuffix {
 struct AdoptionPlan {
     let canonicalPrefix: String
     let prefixOrigin: String
+    let anchorName: String?
     let entries: [TargetPlan]
     let entitlements: [EntitlementsInfo]
     let appGroups: [AppGroupBinding]
@@ -186,6 +187,20 @@ struct AdoptionPlan {
     var skippedSignable: [TargetPlan] {
         skipped.filter { $0.target.isSignable }
     }
+
+    // Anchor di luar prefix itu kontradiksi: prefix diturunin dari target ini.
+    // Kalau nggak nyambung lagi, yang salah Base.xcconfig, bukan target-nya.
+    var anchorDrift: TargetPlan? {
+        guard let anchorName else { return nil }
+        return entries.first { e in
+            guard e.target.name == anchorName,
+                  case let .skip(_, kind) = e.decision else { return false }
+            switch kind {
+            case .outsidePrefix, .watchOutsidePrefix: return true
+            case .other:                              return false
+            }
+        }
+    }
     var legacyPlists: [(target: String, path: String)] {
         entries.compactMap { e in
             e.target.legacyInfoPlist.map { (e.target.name, $0) }
@@ -201,7 +216,13 @@ struct AdoptionPlan {
         let sourceRoot = Path(info.sourceRoot)
         let signable = info.targets.filter(\.isSignable)
         guard !signable.isEmpty else { throw PlanError.noSignableTarget }
-        
+
+        let anchorName: String?
+        switch anchor(in: signable) {
+        case let .one(target): anchorName = target.name
+        case .missing, .ambiguous: anchorName = nil
+        }
+
         var cleanings: [SuffixCleaning] = []
         var suspicious: [SuspiciousSuffix] = []
         
@@ -384,6 +405,7 @@ struct AdoptionPlan {
         return AdoptionPlan(
             canonicalPrefix: prefix,
             prefixOrigin: origin,
+            anchorName: anchorName,
             entries: entries,
             entitlements: ents,
             appGroups: bindings.sorted { $0.variable < $1.variable },
@@ -399,6 +421,27 @@ struct AdoptionPlan {
         if value.hasPrefix(token) { return value }
         guard value.hasPrefix(prefix) else { return nil }
         return token + value.dropFirst(prefix.count)
+    }
+}
+
+extension AdoptionPlan {
+
+    enum AnchorResult {
+        case one(TargetInfo)
+        case missing([String])
+        case ambiguous([String])
+    }
+
+    // Target yang prefix kanonik diturunin darinya. Dipakai dua kali: waktu
+    // `init` nurunin prefix, dan waktu `check` mastiin prefix yang kesimpen
+    // di Base.xcconfig masih nyambung sama target itu.
+    static func anchor(in signable: [TargetInfo]) -> AnchorResult {
+        var apps = signable.filter { $0.isApp && $0.platform != .watchOS }
+        if apps.isEmpty { apps = signable.filter(\.isApp) }
+
+        guard !apps.isEmpty else { return .missing(signable.map(\.name)) }
+        guard apps.count == 1 else { return .ambiguous(apps.map(\.name)) }
+        return .one(apps[0])
     }
 }
 
@@ -462,19 +505,15 @@ private func resolvePrefix(
         return (existing, "Configs/Base.xcconfig")
     }
     
-    var apps = signable.filter { $0.isApp && $0.platform != .watchOS }
-    if apps.isEmpty {
-        apps = signable.filter(\.isApp)
+    let anchor: TargetInfo
+    switch AdoptionPlan.anchor(in: signable) {
+    case let .one(target):
+        anchor = target
+    case let .missing(names):
+        throw PlanError.noAnchor(names)
+    case let .ambiguous(names):
+        throw PlanError.ambiguousAnchor(names)
     }
-    
-    guard !apps.isEmpty else {
-        throw PlanError.noAnchor(signable.map(\.name))
-    }
-    guard apps.count == 1 else {
-        throw PlanError.ambiguousAnchor(apps.map(\.name))
-    }
-    
-    let anchor = apps[0]
     // Base.xcconfig nggak ada tapi Local.xcconfig ada → anchor-nya sendiri
     // bisa tercemar. Suffix app selalu di ekor.
     let all = anchor.configs.compactMap(\.bundleID)
