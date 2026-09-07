@@ -256,12 +256,35 @@ enum Report {
         }
         
         let otherSkips = unmanaged.filter { $0.kind != .watchOutsidePrefix }
-        if !otherSkips.isEmpty {
+        let embeddedSkips = otherSkips.filter(\.isEmbedded)
+        let standaloneSkips = otherSkips.filter { !$0.isEmbedded }
+        
+        if !embeddedSkips.isEmpty {
             var lines = [
-                "\(otherSkips.count) \(plural(otherSkips.count, "target")) is not managed by ezconfig",
+                "\(embeddedSkips.count) \(plural(embeddedSkips.count, "target")) will stop the project from building",
                 "",
             ]
-            for s in otherSkips {
+            for s in embeddedSkips {
+                lines.append("  \(s.target)   \(s.bundleID ?? "?")")
+            }
+            lines.append("")
+            lines.append("Apple requires an embedded extension or watch app to carry the")
+            lines.append("bundle ID of the app it ships inside. These do not start with")
+            lines.append("\(o.canonicalPrefix), so they never pick up a developer's suffix")
+            lines.append("while the parent app does. The build fails on every machine")
+            lines.append("where a suffix is set.")
+            lines.append("")
+            lines.append("To fix: give them a bundle ID starting with \(o.canonicalPrefix)")
+            lines.append("in Xcode, then run ezconfig init again.")
+            attention.append(lines)
+        }
+        
+        if !standaloneSkips.isEmpty {
+            var lines = [
+                "\(standaloneSkips.count) \(plural(standaloneSkips.count, "target")) is not managed by ezconfig",
+                "",
+            ]
+            for s in standaloneSkips {
                 lines.append("  \(s.target)   \(s.bundleID ?? "?")")
             }
             lines.append("")

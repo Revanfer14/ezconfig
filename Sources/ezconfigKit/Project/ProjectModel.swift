@@ -77,6 +77,10 @@ struct TargetInfo {
         rawProductType == "com.apple.product-type.application"
     }
     
+    var isEmbedded: Bool {
+        rawProductType.contains("extension") || (isApp && platform == .watchOS)
+    }
+    
     var entitlementPaths: [String] {
         var seen: [String] = []
         for c in configs {

@@ -91,6 +91,7 @@ struct InitOutcome {
         let kind: TargetPlan.SkipKind
         let bundleID: String?
         let blocksCheck: Bool
+        let isEmbedded: Bool
     }
     
     var canonicalPrefix = ""
@@ -192,7 +193,8 @@ struct ProjectWriter {
                     reason: reasonText(e.decision),
                     kind: skipKind(e.decision),
                     bundleID: e.currentBundleID,
-                    blocksCheck: e.target.isSignable
+                    blocksCheck: e.target.isSignable,
+                    isEmbedded: e.target.isEmbedded
                 )
             )
         }
