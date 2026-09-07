@@ -32,13 +32,14 @@ enum ReaderError: Error, CustomStringConvertible {
 enum ProjectReader {
     static func locate(in path: String) throws -> String {
         let fm = FileManager.default
-        let expanded = (path as NSString).expandingTildeInPath
+        var expanded = (path as NSString).expandingTildeInPath
+        while expanded.count > 1 && expanded.hasSuffix("/") { expanded.removeLast() }
         
         if expanded.hasSuffix(".xcodeproj") {
             guard fm.fileExists(atPath: expanded) else {
                 throw ReaderError.notFound(expanded)
             }
-            return expanded
+            return canonicalize(expanded, fm: fm)
         }
         
         let items = (try? fm.contentsOfDirectory(atPath: expanded)) ?? []
@@ -49,6 +50,21 @@ enum ProjectReader {
         case 1:  return (expanded as NSString).appendingPathComponent(projects[0])
         default: throw ReaderError.ambiguous(projects)
         }
+    }
+    
+    private static func canonicalize(_ path: String, fm: FileManager) -> String {
+        let ns = path as NSString
+        let parentRaw = ns.deletingLastPathComponent
+        let parent = parentRaw.isEmpty ? "." : parentRaw
+        let name = ns.lastPathComponent
+        
+        let items = (try? fm.contentsOfDirectory(atPath: parent)) ?? []
+        guard let real = items.first(where: {
+            $0.caseInsensitiveCompare(name) == .orderedSame
+        }) else {
+            return path
+        }
+        return (parent as NSString).appendingPathComponent(real)
     }
     
     static func read(_ projectPath: String) throws -> ProjectInfo {
