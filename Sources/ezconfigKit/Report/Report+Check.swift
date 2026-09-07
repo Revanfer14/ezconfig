@@ -131,6 +131,52 @@ extension Report {
         emit("")
         emit("    Fix the bundle ID in Xcode, or: ezconfig init --prefix <id>")
     }
+    
+    static func printUnlinked(
+        _ findings: [Finding],
+        projectName: String,
+        toStdout: Bool
+    ) {
+        guard !findings.isEmpty else { return }
+        let emit = emitter(toStdout: toStdout)
+        let width = findings.map(\.key.label.count).max() ?? 0
+
+        emit("ezconfig: \(findings.count) value(s) in \(projectName) belong to a target")
+        emit("that is not linked to Configs/Base.xcconfig.")
+        emit("")
+        for f in findings { emit(findingLine(f, width: width)) }
+        emit("")
+        emit("  Rewriting these would point them at $(BUNDLE_PREFIX), a variable")
+        emit("  that target cannot see. It would resolve to nothing and the bundle")
+        emit("  ID would come out malformed, so ezconfig left them alone.")
+        emit("")
+        emit("  Linking is done by init, not by the hook. Close Xcode and run:")
+        emit("    ezconfig init")
+        emit("  Then commit the project file and Configs/Base.xcconfig together.")
+        emit("")
+    }
+    
+    static func printDangling(_ audit: ConfigAudit, toStdout: Bool) {
+        guard !audit.dangling.isEmpty else { return }
+        let emit = emitter(toStdout: toStdout)
+        let width = audit.dangling.map(\.target.count).max() ?? 0
+
+        emit("ezconfig: \(audit.dangling.count) build configuration(s) use $(BUNDLE_PREFIX)")
+        emit("but are not linked to Configs/Base.xcconfig.")
+        emit("")
+        for d in audit.dangling {
+            emit("    \(padRight(d.target, width))  \(padRight(d.config, 8))  \(d.value)")
+        }
+        emit("")
+        emit("  The variable is undefined in those targets, so it resolves to")
+        emit("  nothing and the bundle ID comes out malformed. The build either")
+        emit("  fails or ships under the wrong identifier.")
+        emit("")
+        emit("  Close Xcode and run:")
+        emit("    ezconfig init")
+        emit("  Then commit the project file and Configs/Base.xcconfig together.")
+        emit("")
+    }
 
     static func printAudit(_ audit: ConfigAudit, toStdout: Bool) {
         guard !audit.isClean, audit.baseExists else { return }

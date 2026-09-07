@@ -12,6 +12,14 @@ import PathKit
 struct ConfigAudit {
     var baseExists = false
     var undefined: [(file: String, variable: String)] = []
+    
+    struct Dangling {
+        let target: String
+        let config: String
+        let value: String
+    }
+
+    var dangling: [Dangling] = []
 
     var isClean: Bool { baseExists && undefined.isEmpty }
 
@@ -32,6 +40,8 @@ struct ConfigAudit {
         let defined = Set(BaseConfig.values(from: basePath).keys)
 
         guard let info = try? ProjectReader.read(projectPath) else { return audit }
+        
+        audit.dangling = dangling(info: info)
 
         var seen: Set<String> = []
         for target in info.targets {
@@ -49,6 +59,22 @@ struct ConfigAudit {
         }
 
         return audit
+    }
+    
+    static func dangling(info: ProjectInfo) -> [Dangling] {
+        var out: [Dangling] = []
+        for target in info.targets {
+            for config in target.configs {
+                guard let bid = config.bundleID,
+                      bid.value.contains(AdoptionPlan.token) else { continue }
+                let base = config.baseConfigFile ?? ""
+                guard !base.hasSuffix("Base.xcconfig") else { continue }
+                out.append(
+                    Dangling(target: target.name, config: config.name, value: bid.value)
+                )
+            }
+        }
+        return out
     }
 
     private static func variables(in text: String) -> Set<String> {

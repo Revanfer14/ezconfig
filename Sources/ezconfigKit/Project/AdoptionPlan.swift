@@ -531,7 +531,7 @@ private func decide(
     guard target.isSignable else {
         return TargetPlan(
             target: target,
-            decision: .skip(reason: "nggak punya bundle ID", kind: .other),
+            decision: .skip(reason: "no bundle ID", kind: .other),
             currentBundleID: nil
         )
     }
@@ -584,8 +584,8 @@ private func decide(
     guard outside.isEmpty else {
         let isWatchApp = target.platform == .watchOS && target.isApp
         let reason = isWatchApp
-            ? "watch app di luar prefix \(prefix)"
-            : "di luar prefix \(prefix)"
+            ? "watch app outside the prefix \(prefix)"
+            : "outside the prefix \(prefix)"
 
         return TargetPlan(
             target: target,
@@ -608,7 +608,7 @@ private func decide(
     guard remainders.count == 1 else {
         return TargetPlan(
             target: target,
-            decision: .skip(reason: "bundle ID beda antar konfigurasi", kind: .other),
+            decision: .skip(reason: "bundle ID differs between configurations", kind: .other),
             currentBundleID: rawValues.sorted().joined(separator: " / ")
         )
     }

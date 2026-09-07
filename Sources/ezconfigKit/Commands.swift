@@ -168,10 +168,25 @@ extension Ezconfig {
                 PbxprojScanner.scan(text, suffixes: suffixes),
                 allowlist: allow
             )
+            
             let audit = ConfigAudit.run(
                 sourceRoot: ctx.sourceRoot,
                 projectPath: ctx.projectPath.string
             )
+            
+            guard split.unlinked.isEmpty else {
+                Report.printUnlinked(
+                    split.unlinked,
+                    projectName: ctx.projectName,
+                    toStdout: !staged
+                )
+                throw ExitCode.failure
+            }
+            
+            guard audit.dangling.isEmpty else {
+                Report.printDangling(audit, toStdout: !staged)
+                throw ExitCode.failure
+            }
             
             guard !split.blocking.isEmpty else {
                 if !staged {

@@ -13,9 +13,9 @@ extension Report {
     static func printPlan(_ plan: AdoptionPlan) {
         let out: (String) -> Void = { Swift.print($0) }
 
-        out("▸ Rencana adopsi")
-        out("  Prefix kanonik   \(plan.canonicalPrefix)")
-        out("  Sumber prefix    \(plan.prefixOrigin)")
+        out("▸ Adoption plan")
+        out("  Canonical prefix   \(plan.canonicalPrefix)")
+        out("  Taken from         \(plan.prefixOrigin)")
         out("")
 
         let width = plan.entries.map(\.target.name.count).max() ?? 0
@@ -24,31 +24,31 @@ extension Report {
             let name = pad(e.target.name, width)
             switch e.decision {
             case .anchor:
-                out("  ✓ \(name)  $(BUNDLE_PREFIX)          [acuan]")
+                out("  ✓ \(name)  $(BUNDLE_PREFIX)          [anchor]")
             case let .adopt(remainder):
                 out("  ✓ \(name)  $(BUNDLE_PREFIX)\(remainder)")
             case .alreadyAdopted:
-                out("  · \(name)  udah pakai variabel")
+                out("  · \(name)  already using the variable")
             case let .skip(reason, _):
-                out("  ✗ \(name)  DILEWATIN — \(reason)")
+                out("  ✗ \(name)  SKIPPED, \(reason)")
                 if let cur = e.currentBundleID {
-                    out("    \(pad("", width))  sekarang: \(cur)")
+                    out("    \(pad("", width))  currently: \(cur)")
                 }
             }
         }
         out("")
-        
+
         printSuffixCleanings(plan.cleanings, suspicious: plan.suspicious)
 
         if !plan.companions.isEmpty {
-            out("▸ Companion reference")
+            out("▸ Companion references")
             for c in plan.companions {
                 out("  \(c.target)  [\(c.siteLabel)]")
                 if let to = c.to {
                     out("    \(c.key)  \(c.from) → \(to)")
                 } else {
                     out("    \(c.key)  \(c.from)")
-                    out("    ✗ di luar prefix — nggak bisa diturunkan, DILEWATIN")
+                    out("    ✗ outside the prefix, cannot be derived, SKIPPED")
                 }
             }
             out("")
@@ -56,12 +56,12 @@ extension Report {
 
         for p in plan.legacyPlistInfos where !p.exists || !p.isXML {
             out("  ⚠︎  \(p.relativePath)")
-            out("     \(p.exists ? "bukan XML plist — nggak bisa diedit" : "file nggak ketemu")")
+            out("     \(p.exists ? "not an XML plist, cannot be edited" : "file not found")")
             out("")
         }
 
         if !plan.legacyPlists.isEmpty {
-            out("▸ Info.plist terpisah (project lama)")
+            out("▸ Standalone Info.plist (older project layout)")
             for l in plan.legacyPlists {
                 out("  \(l.target)  \(l.path)")
             }
@@ -69,7 +69,7 @@ extension Report {
         }
 
         if !plan.appGroups.isEmpty {
-            out("▸ App Group")
+            out("▸ App Groups")
             for g in plan.appGroups {
                 out("  \(pad(g.variable, 18))\(g.canonical)$(LOCAL_SUFFIX)")
             }
@@ -78,17 +78,17 @@ extension Report {
 
         out("▸ Entitlements")
         if plan.entitlementPlans.isEmpty {
-            out("  Nggak ada target yang pakai .entitlements.")
+            out("  No target uses an .entitlements file.")
         }
         for p in plan.entitlementPlans {
             let mark = p.blocked ? "⚠︎" : (p.hasWork ? "!" : "·")
             out("  \(mark) \(p.file.relativePath)")
             if !p.file.exists {
-                out("    FILE NGGAK KETEMU di disk")
+                out("    FILE NOT FOUND on disk")
                 continue
             }
             if p.blocked {
-                out("    bukan XML plist — nggak bisa diedit otomatis")
+                out("    not an XML plist, cannot be edited automatically")
                 continue
             }
             for r in p.appGroupRewrites {
@@ -98,7 +98,7 @@ extension Report {
                 out("    keychain group   \(r.from) → \(r.to)")
             }
             if !p.hasWork {
-                out("    udah pakai variabel / nggak ada yang perlu diubah")
+                out("    already using variables, nothing to change")
             }
         }
         out("")
@@ -106,10 +106,11 @@ extension Report {
         let n = plan.adopted.count
         let s = plan.skipped.count
         out(String(repeating: "─", count: 50))
-        out("  \(n) target bakal diadopsi, \(s) dilewatin.")
+        out("  \(n) target(s) would be adopted, \(s) skipped.")
         if s > 0 {
-            out("  Target yang dilewatin bundle ID-nya tetap literal —")
-            out("  `check` bakal terus nolak commit sampai itu dibenerin.")
+            out("  Skipped targets keep their literal bundle ID. `check` leaves")
+            out("  them alone, so commits still go through. To bring one in,")
+            out("  give it the same prefix in Xcode and run init again.")
         }
         out("")
     }

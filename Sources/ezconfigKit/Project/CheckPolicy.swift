@@ -9,20 +9,22 @@ import Foundation
 import PathKit
 
 enum CheckPolicy {
-
+    
     // Dua himpunan, bukan satu, karena artinya beda jauh dan `--strict`
     // cuma boleh nyentuh yang pertama.
     struct Allowlist {
         var outsidePrefix: Set<String> = []   // target di luar prefix, sengaja
         var unfixable: Set<String> = []       // suffix nggak dikenal, ezconfig nolak nebak
+        var unlinked: Set<String> = []        // target belum nunjuk Base.xcconfig
     }
-
+    
     struct Split {
         var blocking: [Finding] = []
         var tolerated: [Finding] = []
         var unfixable: [Finding] = []
+        var unlinked: [Finding] = []
     }
-
+    
     static func allowlist(projectPath: String) -> Allowlist {
         let sourceRoot = Path(projectPath).parent()
         guard let info = try? ProjectReader.read(projectPath),
@@ -31,9 +33,9 @@ enum CheckPolicy {
                 knownSuffixes: LocalConfig.knownSuffixes(sourceRoot: sourceRoot)
               )
         else { return Allowlist() }
-
+        
         var out = Allowlist()
-
+        
         for e in plan.skipped {
             guard let current = e.currentBundleID else { continue }
             // currentBundleID bisa gabungan "a / b" waktu beda antar konfigurasi.
@@ -42,21 +44,28 @@ enum CheckPolicy {
                 if !v.isEmpty { out.outsidePrefix.insert(v) }
             }
         }
-
+        
         for c in plan.unresolvedCompanions {
             out.outsidePrefix.insert(c.from)
         }
-
-        // Nilai SETELAH pembersihan, bukan nilai mentah. Kalau nilai mentah ikut
-        // masuk, kasus suffix dobel ke-tolerate duluan dan suffix yang anchored
-        // nggak pernah kebersihin. Itu kebocoran beneran, Release bawa Team ID.
+        
         for s in plan.suspicious {
             out.unfixable.insert(s.resolved)
         }
-
+        
+        for e in plan.entries {
+            if case .skip = e.decision { continue }
+            for c in e.target.configs {
+                let base = c.baseConfigFile ?? ""
+                guard !base.hasSuffix("Base.xcconfig") else { continue }
+                if let bid = c.bundleID { out.unlinked.insert(bid.value) }
+                if let comp = c.companionBundleID { out.unlinked.insert(comp.value) }
+            }
+        }
+        
         return out
     }
-
+    
     static func split(_ findings: [Finding], allowlist: Allowlist) -> Split {
         var s = Split()
         for f in findings {
@@ -65,6 +74,9 @@ enum CheckPolicy {
                     s.unfixable.append(f)
                 } else if allowlist.outsidePrefix.contains(f.value) {
                     s.tolerated.append(f)
+                } else if allowlist.unlinked.contains(f.value) {
+                    // Bocor beneran, tapi `--fix` nggak punya jalan. Jawabannya init.
+                    s.unlinked.append(f)
                 } else {
                     s.blocking.append(f)
                 }
@@ -74,11 +86,14 @@ enum CheckPolicy {
             switch f.key {
             case .developmentTeam, .attributeTeam,
                     .provisioningProfile, .provisioningSpecifier:
+                // killKeys dibuang tanpa syarat link, jadi ini selalu fixable.
                 s.blocking.append(f)
 
             case .bundleID, .companionBundleID:
                 if allowlist.outsidePrefix.contains(f.value) {
                     s.tolerated.append(f)
+                } else if allowlist.unlinked.contains(f.value) {
+                    s.unlinked.append(f)
                 } else {
                     s.blocking.append(f)
                 }

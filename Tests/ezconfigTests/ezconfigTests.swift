@@ -147,3 +147,120 @@ struct SuspiciousDetection {
         #expect(SuffixCleaner.suspiciousComponent(in: "Tests") == nil)
     }
 }
+
+// Helper
+
+private func makeConfig(
+    name: String,
+    bundleID: String?,
+    baseConfigFile: String?
+) -> ConfigInfo {
+    ConfigInfo(
+        name: name,
+        bundleID: bundleID.map { SettingValue(value: $0, source: .target) },
+        team: nil,
+        baseConfigFile: baseConfigFile,
+        sdkroot: "iphoneos",
+        entitlements: nil,
+        companionBundleID: nil,
+        infoPlistFile: nil,
+        generatesInfoPlist: true
+    )
+}
+
+private func makeInfo(_ targets: [(String, [ConfigInfo])]) -> ProjectInfo {
+    ProjectInfo(
+        path: "/tmp/T.xcodeproj",
+        name: "T",
+        targets: targets.map {
+            TargetInfo(
+                name: $0.0,
+                productType: "app",
+                rawProductType: "com.apple.product-type.application",
+                platform: .iOS,
+                attributeTeam: nil,
+                configs: $0.1
+            )
+        }
+    )
+}
+
+@Suite("template tanpa link ketangkep")
+struct DanglingTemplate {
+
+    @Test("target ke-link nggak dilaporin")
+    func linkedIsClean() {
+        let info = makeInfo([("App", [
+            makeConfig(name: "Debug", bundleID: "$(BUNDLE_PREFIX)", baseConfigFile: "Base.xcconfig"),
+            makeConfig(name: "Release", bundleID: "$(BUNDLE_PREFIX)", baseConfigFile: "Base.xcconfig"),
+        ])])
+        #expect(ConfigAudit.dangling(info: info).isEmpty)
+    }
+
+    @Test("template tanpa link ketangkep di semua config")
+    func unlinkedCaught() {
+        let info = makeInfo([("Notif", [
+            makeConfig(name: "Debug", bundleID: "$(BUNDLE_PREFIX).Notif", baseConfigFile: nil),
+            makeConfig(name: "Release", bundleID: "$(BUNDLE_PREFIX).Notif", baseConfigFile: nil),
+        ])])
+        #expect(ConfigAudit.dangling(info: info).count == 2)
+    }
+
+    // Kasus yang bikin cek per-target bakal lolos diem-diem.
+    @Test("Debug ke-link tapi Release nggak, tetap ketangkep")
+    func halfLinked() {
+        let info = makeInfo([("App", [
+            makeConfig(name: "Debug", bundleID: "$(BUNDLE_PREFIX)", baseConfigFile: "Base.xcconfig"),
+            makeConfig(name: "Release", bundleID: "$(BUNDLE_PREFIX)", baseConfigFile: nil),
+        ])])
+        let d = ConfigAudit.dangling(info: info)
+        #expect(d.count == 1)
+        #expect(d.first?.config == "Release")
+    }
+
+    @Test("literal tanpa link bukan urusan dangling")
+    func literalIgnored() {
+        let info = makeInfo([("Notif", [
+            makeConfig(name: "Debug", bundleID: "com.revan.T.Notif", baseConfigFile: nil),
+        ])])
+        #expect(ConfigAudit.dangling(info: info).isEmpty)
+    }
+}
+
+@Suite("nilai di target nggak ke-link nggak masuk blocking")
+struct UnlinkedRouting {
+
+    private func finding(_ value: String) -> Finding {
+        Finding(key: .bundleID, kind: .literal, value: value, line: 1)
+    }
+
+    @Test("dirutein ke unlinked, bukan blocking")
+    func routedAway() {
+        var allow = CheckPolicy.Allowlist()
+        allow.unlinked = ["com.revan.T.Notif"]
+
+        let s = CheckPolicy.split([finding("com.revan.T.Notif")], allowlist: allow)
+        #expect(s.blocking.isEmpty)
+        #expect(s.unlinked.count == 1)
+    }
+
+    @Test("outsidePrefix menang atas unlinked")
+    func toleratedWins() {
+        var allow = CheckPolicy.Allowlist()
+        allow.outsidePrefix = ["com.lain.widget"]
+        allow.unlinked = ["com.lain.widget"]
+
+        let s = CheckPolicy.split([finding("com.lain.widget")], allowlist: allow)
+        #expect(s.tolerated.count == 1)
+        #expect(s.unlinked.isEmpty)
+    }
+
+    @Test("Team ID tetap blocking walau targetnya nggak ke-link")
+    func teamStillBlocks() {
+        var allow = CheckPolicy.Allowlist()
+        allow.unlinked = ["ABCDE12345"]
+
+        let f = Finding(key: .developmentTeam, kind: .literal, value: "ABCDE12345", line: 1)
+        #expect(CheckPolicy.split([f], allowlist: allow).blocking.count == 1)
+    }
+}

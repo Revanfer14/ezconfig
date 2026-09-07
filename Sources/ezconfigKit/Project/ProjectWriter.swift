@@ -17,28 +17,31 @@ enum InitError: Error, CustomStringConvertible {
     var description: String {
         switch self {
         case .noNativeTarget:
-            return "Nggak nemu native target di project ini."
+            return "No native target found in this project."
         case let .foreignBaseConfig(lines):
             return """
-            Ada target yang udah punya xcconfig sendiri:
+            Some targets already point at an xcconfig of their own:
               \(lines.joined(separator: "\n  "))
-            ezconfig nggak bakal nimpa punya orang. Handling ini nyusul di fase lain.
+            ezconfig will not overwrite a file it did not create.
             """
         case .noRootGroup:
-            return "Project nggak punya root group — struktur nggak wajar."
+            return "This project has no root group. The file structure is not what Xcode normally writes."
         }
-    }
-}
+    }}
 
 enum StripError: Error, CustomStringConvertible {
     case notInitialized
     
     var description: String {
         """
-        Project ini belum di-init — Configs/Base.xcconfig nggak ada.
-        `check --fix` nulis PRODUCT_BUNDLE_IDENTIFIER jadi $(BUNDLE_PREFIX),
-        variabel yang cuma hidup di Base.xcconfig. Tanpa itu project-nya rusak.
-        Jalanin dulu: ezconfig init
+        This project has not been initialised. Configs/Base.xcconfig is missing.
+
+        `check --fix` rewrites PRODUCT_BUNDLE_IDENTIFIER to $(BUNDLE_PREFIX),
+        a variable that only lives in Base.xcconfig. Without that file the
+        project would be left broken.
+
+        Run this first:
+          ezconfig init
         """
     }
 }
@@ -51,13 +54,14 @@ struct StripOutcome {
     var companionsRewritten = 0
     var touchedTargets: [String] = []
     
+    var unlinkedTargets: [String] = []
+    
     var isEmpty: Bool {
         teamsRemoved == 0 && provisioningRemoved == 0
         && attributeTeamsRemoved == 0 && bundleIDsRewritten == 0
         && companionsRewritten == 0
     }
 }
-
 struct InitOutcome {
     struct Adopted {
         let target: String
@@ -174,7 +178,7 @@ struct ProjectWriter {
         let basePath = configsDir + "Base.xcconfig"
         outcome.baseConfigPath = "Configs/Base.xcconfig"
         outcome.baseConfigCreated = !basePath.exists
-
+        
         if !dryRun {
             try FileManager.default.createDirectory(
                 atPath: configsDir.string,
@@ -218,21 +222,13 @@ struct ProjectWriter {
         // 2. Daftarin xcconfig sekali.
         let fileRef = try registerBaseConfigFile(at: basePath)
         let editsByTarget = edits(from: plan)
-
-        for target in xcodeproj.pbxproj.nativeTargets.sorted(by: { $0.name < $1.name }) {
-            stripTarget(
-                target,
-                edits: editsByTarget[target.name] ?? TargetEdits(),
-                into: &outcome.strip
-            )
-        }
-
+        
         // Waktu semua target udah teradopsi, template-nya nil karena nggak ada
         // yang perlu ditulis. Target-nya tetap dikelola, jadi tetap harus muncul.
         var planByName: [String: TargetPlan] = [:]
         for e in plan.entries { planByName[e.target.name] = e }
-
-        // Link xcconfig cuma ke target yang diadopsi.
+        
+        // 2a. Link xcconfig duluan, cuma ke target yang diadopsi.
         for target in touchTargets.sorted(by: { $0.name < $1.name }) {
             var linked: [String] = []
             for config in target.buildConfigurationList?.buildConfigurations ?? [] {
@@ -240,15 +236,24 @@ struct ProjectWriter {
                 linked.append(config.name)
             }
             outcome.linkedTargets += 1
-
+            
             guard let entry = planByName[target.name] else { continue }
             if case .skip = entry.decision { continue }
-
+            
             let shown = editsByTarget[target.name]?.bundleIDTemplate
-                ?? entry.currentBundleID
-                ?? AdoptionPlan.token
+            ?? entry.currentBundleID
+            ?? AdoptionPlan.token
             outcome.adopted.append(
                 .init(target: target.name, template: shown, configs: linked.sorted())
+            )
+        }
+        
+        // 2b. Baru strip.
+        for target in xcodeproj.pbxproj.nativeTargets.sorted(by: { $0.name < $1.name }) {
+            stripTarget(
+                target,
+                edits: editsByTarget[target.name] ?? TargetEdits(),
+                into: &outcome.strip
             )
         }
         
@@ -278,7 +283,7 @@ struct ProjectWriter {
         if case let .skip(reason, _) = d { return reason }
         return "—"
     }
-
+    
     private func skipKind(_ d: TargetPlan.Decision) -> TargetPlan.SkipKind {
         if case let .skip(_, kind) = d { return kind }
         return .other
@@ -362,6 +367,13 @@ struct ProjectWriter {
         }
     }
     
+    private static func isLinked(_ config: XCBuildConfiguration) -> Bool {
+        let path = config.baseConfiguration?.path
+        ?? config.baseConfiguration?.name
+        ?? ""
+        return path.hasSuffix("Base.xcconfig")
+    }
+    
     // edits.bundleIDTemplate == nil → bundle ID dibiarin (target di luar prefix).
     private func stripTarget(
         _ target: PBXNativeTarget,
@@ -369,12 +381,20 @@ struct ProjectWriter {
         into outcome: inout StripOutcome
     ) {
         var touched = false
-
+        var blocked = false
+        
         for config in target.buildConfigurationList?.buildConfigurations ?? [] {
             let before = outcome.teamsRemoved + outcome.provisioningRemoved
             removeKills(from: &config.buildSettings, into: &outcome)
             if outcome.teamsRemoved + outcome.provisioningRemoved > before { touched = true }
-
+            
+            guard Self.isLinked(config) else {
+                if edits.bundleIDTemplate != nil || !edits.settings.isEmpty {
+                    blocked = true
+                }
+                continue
+            }
+            
             if let template = edits.bundleIDTemplate,
                let value = config.buildSettings["PRODUCT_BUNDLE_IDENTIFIER"] as? String,
                Self.unquote(value) != template {
@@ -382,7 +402,7 @@ struct ProjectWriter {
                 outcome.bundleIDsRewritten += 1
                 touched = true
             }
-
+            
             for (key, template) in edits.settings {
                 guard let value = config.buildSettings[key] as? String,
                       Self.unquote(value) != template else { continue }
@@ -391,7 +411,11 @@ struct ProjectWriter {
                 touched = true
             }
         }
-
+        
+        if blocked, !outcome.unlinkedTargets.contains(target.name) {
+            outcome.unlinkedTargets.append(target.name)
+        }
+        
         if let project = xcodeproj.pbxproj.rootObject,
            var attrs = project.attributes(for: target),
            attrs["DevelopmentTeam"] != nil {
@@ -401,7 +425,7 @@ struct ProjectWriter {
             outcome.attributeTeamsRemoved += 1
             touched = true
         }
-
+        
         if touched { outcome.touchedTargets.append(target.name) }
     }
     
@@ -431,22 +455,22 @@ struct ProjectWriter {
     
     private func rewritePlists(_ plan: AdoptionPlan, into outcome: inout InitOutcome) {
         var byPath: [String: [(key: String, to: String)]] = [:]
-
+        
         for c in plan.companions {
             guard case let .plistFile(path) = c.site, let to = c.to else { continue }
             byPath[path, default: []].append((c.key, to))
         }
-
+        
         for (path, list) in byPath.sorted(by: { $0.key < $1.key }) {
             let full = sourceRoot + Path(path)
-
+            
             guard let original = try? String(contentsOfFile: full.string, encoding: .utf8),
                   PlistText.isXML(original)
             else {
                 outcome.plistFailures.append(path)
                 continue
             }
-
+            
             var text = original
             var n = 0
             for e in list {
@@ -454,16 +478,16 @@ struct ProjectWriter {
                 text = r.text
                 n += r.replaced
             }
-
+            
             guard n > 0, text != original else { continue }
-
+            
             do {
                 try text.write(toFile: full.string, atomically: true, encoding: .utf8)
                 outcome.plistEdits.append((path: path, count: n))
             } catch {
                 outcome.plistFailures.append(path)
             }
-
+            
             for c in plan.companions where c.isPlistFile && c.siteLabel == path {
                 if let to = c.to {
                     outcome.companionEdits.append((c.target, path, c.from, to))
@@ -475,10 +499,10 @@ struct ProjectWriter {
     private func rewriteEntitlements(_ plan: AdoptionPlan, into outcome: inout InitOutcome) {
         for p in plan.entitlementPlans.sorted(by: { $0.file.relativePath < $1.file.relativePath }) {
             guard p.hasWork else { continue }
-
+            
             let rel = p.file.relativePath
             let full = sourceRoot + Path(rel)
-
+            
             guard p.file.exists else {
                 outcome.entitlementFailures.append((rel, "file nggak ketemu"))
                 continue
@@ -489,24 +513,24 @@ struct ProjectWriter {
                 outcome.entitlementFailures.append((rel, "bukan XML plist — edit manual"))
                 continue
             }
-
+            
             let groupMap = Dictionary(uniqueKeysWithValues: p.appGroupRewrites.map { ($0.from, $0.to) })
             let keyMap = Dictionary(uniqueKeysWithValues: p.keychainRewrites.map { ($0.from, $0.to) })
-
+            
             var text = original
-
+            
             let a = PlistText.replaceArrayStrings(
                 key: EntitlementsReader.appGroupKey, in: text
             ) { groupMap[$0] }
             text = a.text
-
+            
             let k = PlistText.replaceArrayStrings(
                 key: EntitlementsReader.keychainKey, in: text
             ) { keyMap[$0] }
             text = k.text
-
+            
             guard a.replaced + k.replaced > 0, text != original else { continue }
-
+            
             do {
                 try text.write(toFile: full.string, atomically: true, encoding: .utf8)
                 outcome.entitlementEdits.append((rel, a.replaced, k.replaced))
@@ -515,7 +539,7 @@ struct ProjectWriter {
             }
         }
     }
-
+    
     // Build setting nggak nyentuh string literal di Swift. Kalau App Group
     // di-hardcode di kode, Debug bakal nunjuk container yang nggak ada.
     private func scanHardcodedGroups(_ plan: AdoptionPlan, into outcome: inout InitOutcome) {
