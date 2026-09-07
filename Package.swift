@@ -1,4 +1,4 @@
-// swift-tools-version: 6.3
+// swift-tools-version: 6.0
 // The swift-tools-version declares the minimum version of Swift required to build this package.
 
 import PackageDescription
@@ -6,6 +6,9 @@ import PackageDescription
 let package = Package(
     name: "ezconfig",
     platforms: [.macOS(.v13)],
+    products: [
+        .executable(name: "ezconfig", targets: ["ezconfig"]),
+    ],
     dependencies: [
         .package(
             url: "https://github.com/apple/swift-argument-parser",
@@ -29,10 +32,10 @@ let package = Package(
                 .product(name: "PathKit", package: "PathKit"),
             ]
         ),
-            .executableTarget(
-                name: "ezconfig",
-                dependencies: ["ezconfigKit"]
-            ),
+        .executableTarget(
+            name: "ezconfig",
+            dependencies: ["ezconfigKit"]
+        ),
         .testTarget(
             name: "ezconfigTests",
             dependencies: ["ezconfigKit"]
