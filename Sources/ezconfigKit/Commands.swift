@@ -30,9 +30,6 @@ extension Ezconfig {
         @Flag(name: .long, help: "Show the plan without writing anything.")
         var dryRun = false
 
-        @Flag(name: .long, help: "Run even if Xcode is open.")
-        var force = false
-
         @Flag(name: .long, help: "Skip the setup step after init.")
         var noSetup = false
 
@@ -40,25 +37,6 @@ extension Ezconfig {
         var team: String?
 
         func run() throws {
-            if !dryRun, !force, Xcode.isRunning {
-                throw ValidationError("""
-                Xcode is running.
-
-                Xcode keeps resolved build setting values in memory and can write
-                them back to the project file. `init` reads those values to work
-                out the canonical bundle prefix and stores it in Base.xcconfig,
-                which is committed and shared with everyone on the team.
-
-                Nothing checks Base.xcconfig afterwards. If it is built from
-                values Xcode is about to overwrite, the wrong prefix ships to
-                the whole team and no later command will catch it.
-
-                Close Xcode and run this again.
-                If the project Xcode has open is a different one, this is safe:
-                  ezconfig init --force
-                """)
-            }
-
             let projectPath = Path(try ProjectReader.locate(in: options.path))
 
             let writer = try ProjectWriter(projectPath: projectPath)
@@ -72,7 +50,12 @@ extension Ezconfig {
                 )
             }
 
-            Report.printInit(outcome, projectName: projectPath.lastComponent, dryRun: dryRun)
+            Report.printInit(
+                outcome,
+                projectName: projectPath.lastComponent,
+                dryRun: dryRun,
+                xcodeRunning: Xcode.isRunning
+            )
         }
 
         // Setup nggak boleh bikin init gagal. Waktu ini kepanggil, .pbxproj udah

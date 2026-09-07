@@ -144,7 +144,7 @@ enum Report {
         out("")
     }
     
-    static func printInit(_ o: InitOutcome, projectName: String, dryRun: Bool) {
+    static func printInit(_ o: InitOutcome, projectName: String, dryRun: Bool, xcodeRunning: Bool) {
         let out: (String) -> Void = { Swift.print($0) }
         
         out("")
@@ -372,9 +372,15 @@ enum Report {
         } else {
             out("Next: run `ezconfig setup` before building.")
         }
+        if xcodeRunning {
+            out("")
+            out("Xcode is running and will reload these changes if it has this")
+            out("project open. If it writes signing values back, the pre-commit")
+            out("hook cleans them.")
+        }
         out("")
     }
-    
+
     static func printSetup(_ o: SetupOutcome) {
         let out: (String) -> Void = { Swift.print($0) }
         
