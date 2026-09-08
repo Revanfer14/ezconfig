@@ -1,3 +1,4 @@
+import ArgumentParser
 import Foundation
 import PathKit
 import Testing
@@ -374,6 +375,32 @@ struct ProjectWriterDigestGuard {
             let entitlements: String = try (root + MinimalProject.entitlementsFile).read()
             #expect(entitlements.contains("$(APP_GROUP_ID)"))
             #expect(!entitlements.contains(literal))
+        }
+    }
+}
+
+@Suite("InitCommand menolak jalan di luar repo git")
+struct InitCommandGitGuard {
+
+    @Test("init tanpa --dry-run di luar repo throw dan nggak nulis apa-apa")
+    func refusesOutsideRepo() throws {
+        try withTempRoot { root in
+            try MinimalProject.materialize(in: root, withBaseConfig: false)
+
+            let cmd = try Ezconfig.InitCommand.parse(["--path", root.string])
+            #expect(throws: ExitCode.self) { try cmd.run() }
+            #expect(!(root + "Configs").exists)
+        }
+    }
+
+    @Test("init --dry-run tetap jalan di luar repo, nggak nulis apa-apa")
+    func dryRunAllowedOutsideRepo() throws {
+        try withTempRoot { root in
+            try MinimalProject.materialize(in: root, withBaseConfig: false)
+
+            let cmd = try Ezconfig.InitCommand.parse(["--path", root.string, "--dry-run"])
+            #expect(throws: Never.self) { try cmd.run() }
+            #expect(!(root + "Configs").exists)
         }
     }
 }

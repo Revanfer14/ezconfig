@@ -38,7 +38,10 @@ let package = Package(
         ),
         .testTarget(
             name: "ezconfigTests",
-            dependencies: ["ezconfigKit"]
+            dependencies: [
+                "ezconfigKit",
+                .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
         ),
     ]
 )

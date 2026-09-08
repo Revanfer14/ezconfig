@@ -38,13 +38,19 @@ extension Ezconfig {
 
         func run() throws {
             let projectPath = Path(try ProjectReader.locate(in: options.path))
+            let sourceRoot = projectPath.parent()
+
+            if !dryRun && Git.repoRoot(sourceRoot) == nil {
+                Report.printNotARepo()
+                throw ExitCode.failure
+            }
 
             let writer = try ProjectWriter(projectPath: projectPath)
             var outcome = try writer.runInit(overridePrefix: prefix, dryRun: dryRun)
 
             if !dryRun && !noSetup {
                 outcome.setup = runSetup(
-                    sourceRoot: projectPath.parent(),
+                    sourceRoot: sourceRoot,
                     projectPath: projectPath.string,
                     team: team
                 )

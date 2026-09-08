@@ -148,6 +148,22 @@ enum Report {
         out("")
     }
     
+    static func printNotARepo() {
+        let out: (String) -> Void = { Swift.print($0) }
+
+        out("")
+        out("Not a git repository")
+        out("")
+        out("  ezconfig writes Configs/Local.xcconfig with your Team ID, and that")
+        out("  file has to be gitignored the moment it is created.")
+        out("")
+        out("  Create the repository first:")
+        out("")
+        out("    git init")
+        out("    ezconfig init")
+        out("")
+    }
+
     static func printInit(_ o: InitOutcome, projectName: String, dryRun: Bool, xcodeRunning: Bool) {
         let out: (String) -> Void = { Swift.print($0) }
         
@@ -208,7 +224,9 @@ enum Report {
             changes.append(("Info.plist", "\(plistCount) \(plural(plistCount, "value")) rewritten"))
         }
         
-        if !o.git.addedRules.isEmpty || !o.git.addedXcodeRules.isEmpty {
+        if !o.git.isRepo {
+            changes.append((".gitignore", "skipped, not a git repo"))
+        } else if !o.git.addedRules.isEmpty || !o.git.addedXcodeRules.isEmpty {
             var parts = o.git.addedRules
             if !o.git.addedXcodeRules.isEmpty {
                 let n = o.git.addedXcodeRules.count
@@ -353,8 +371,8 @@ enum Report {
                 "",
                 o.hook.reason ?? "unknown reason",
                 "",
-                "Without it, Xcode can write your identity back into .pbxproj and",
-                "nobody will notice until someone else fails to build.",
+                "Xcode can write your identity back into .pbxproj and nobody",
+                "will notice until someone else fails to build.",
             ])
         }
         
@@ -374,16 +392,14 @@ enum Report {
                 "\(n) tracked \(plural(n, "file")) now \(n == 1 ? "matches" : "match") a .gitignore rule",
                 "",
             ]
-            for f in o.git.trackedButIgnored.prefix(6) {
+            for f in o.git.trackedButIgnored.prefix(4) {
                 lines.append("  \(f)")
             }
-            if n > 6 { lines.append("  and \(n - 6) more") }
+            if n > 4 { lines.append("  and \(n - 4) more") }
             lines.append("")
-            lines.append("Git does not apply .gitignore to files already in the index, so")
-            lines.append("these keep showing up in every diff. Drop them from tracking:")
+            lines.append("Ignore rules do not apply to files already in the index:")
             lines.append("")
             lines.append("  git rm -r --cached <path>")
-            lines.append("  git commit -m \"chore: untrack build artifacts\"")
             attention.append(lines)
         }
         
@@ -395,8 +411,10 @@ enum Report {
         out(rule)
         if localReady {
             out("Next: open the project and build to verify.")
-            out("Then tell your team to run:")
-            out("  brew install revanfer14/adac9/ezconfig && ezconfig setup")
+            if o.git.isRepo {
+                out("Then tell your team to run:")
+                out("  brew install revanfer14/adac9/ezconfig && ezconfig setup")
+            }
         } else {
             out("Next: run `ezconfig setup` before building.")
         }
@@ -467,7 +485,19 @@ enum Report {
         out("")
         
         var attention: [[String]] = []
-        
+
+        if !o.git.isRepo {
+            attention.append([
+                "Not a git repository",
+                "",
+                "setup expects a folder you cloned from your team's repository.",
+                "Check that you are in the right directory, and that you used",
+                "git clone rather than downloading a ZIP.",
+                "",
+                "The pre-commit hook was skipped too.",
+            ])
+        }
+
         if o.git.localTracked {
             attention.append([
                 "Configs/Local.xcconfig is already committed in this repo",
@@ -493,16 +523,16 @@ enum Report {
             attention.append(lines)
         }
         
-        if case .skipped = o.hook.action {
+        if case .skipped = o.hook.action, o.git.isRepo {
             attention.append([
                 "Pre-commit hook was not installed",
                 "",
                 o.hook.reason ?? "unknown reason",
             ])
         }
-        
+
         printAttention(attention)
-        
+
         out(rule)
         out("Next: open the project and build.")
         out("")
