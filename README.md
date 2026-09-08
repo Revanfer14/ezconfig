@@ -45,8 +45,7 @@ replacement for XcodeGen or Tuist.
 ### Homebrew (recommended)
 
 ```bash
-brew tap Revanfer14/adac9
-brew install ezconfig
+brew install Revanfer14/adac9/ezconfig
 ```
 
 ### Build from source
@@ -64,6 +63,7 @@ Run once, by whoever owns the repository:
 
 ```bash
 cd /path/to/YourProject
+git init #if you haven't
 ezconfig init
 ```
 
