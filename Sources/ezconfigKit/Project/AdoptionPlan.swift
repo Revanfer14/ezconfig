@@ -320,14 +320,22 @@ struct AdoptionPlan {
         var entPlans: [EntitlementsPlan] = []
         for e in ents {
             var groups: [(from: String, to: String)] = []
+            var seenGroups: Set<String> = []
             for g in e.literalAppGroups {
+                guard !seenGroups.contains(g) else { continue }
+                seenGroups.insert(g)
+
                 let canonical = groupCanonical[g] ?? g
                 guard let variable = byCanonical[canonical] else { continue }
                 groups.append((from: g, to: "$(\(variable))"))
             }
-            
+
             var keychains: [(from: String, to: String)] = []
+            var seenKeychains: Set<String> = []
             for k in e.literalKeychainGroups {
+                guard !seenKeychains.contains(k) else { continue }
+                seenKeychains.insert(k)
+
                 let head = EntitlementsReader.head(of: k)
                 let rawTail = EntitlementsReader.tail(of: k)
                 

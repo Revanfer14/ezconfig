@@ -16,8 +16,9 @@ enum MinimalProject {
     static let teamID = "ABCDE12345"
     static let bundleIDToken = "$(BUNDLE_PREFIX)"
 
-    private static func pbxproj(bundleIDValue: String) -> String {
-        """
+    private static func pbxproj(bundleIDValue: String, entitlementsPath: String? = nil) -> String {
+        let entitlementsLine = entitlementsPath.map { "\t\t\t\tCODE_SIGN_ENTITLEMENTS = \($0);\n" } ?? ""
+        return """
     // !$*UTF8*$!
     {
     \tarchiveVersion = 1;
@@ -167,7 +168,7 @@ enum MinimalProject {
     \t\t\tisa = XCBuildConfiguration;
     \t\t\tbaseConfigurationReference = 82E3D3454D94E554A1BCD4DA /* Base.xcconfig */;
     \t\t\tbuildSettings = {
-    \t\t\t\tCODE_SIGN_STYLE = Automatic;
+    \(entitlementsLine)\t\t\t\tCODE_SIGN_STYLE = Automatic;
     \t\t\t\tDEVELOPMENT_TEAM = \(teamID);
     \t\t\t\tGENERATE_INFOPLIST_FILE = YES;
     \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "\(bundleIDValue)";
@@ -181,7 +182,7 @@ enum MinimalProject {
     \t\t\tisa = XCBuildConfiguration;
     \t\t\tbaseConfigurationReference = 82E3D3454D94E554A1BCD4DA /* Base.xcconfig */;
     \t\t\tbuildSettings = {
-    \t\t\t\tCODE_SIGN_STYLE = Automatic;
+    \(entitlementsLine)\t\t\t\tCODE_SIGN_STYLE = Automatic;
     \t\t\t\tDEVELOPMENT_TEAM = \(teamID);
     \t\t\t\tGENERATE_INFOPLIST_FILE = YES;
     \t\t\t\tPRODUCT_BUNDLE_IDENTIFIER = "\(bundleIDValue)";
@@ -220,25 +221,52 @@ enum MinimalProject {
     """
     }
 
+    static let entitlementsFile = "Fixture.entitlements"
+
+    private static func entitlementsPlist(appGroups: [String]) -> String {
+        let items = appGroups.map { "\t\t<string>\($0)</string>\n" }.joined()
+        return """
+    <?xml version="1.0" encoding="UTF-8"?>
+    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+    <plist version="1.0">
+    <dict>
+    \t<key>com.apple.security.application-groups</key>
+    \t<array>
+    \(items)\t</array>
+    </dict>
+    </plist>
+
+    """
+    }
+
     // Taro di folder temp, isinya Fixture.xcodeproj/project.pbxproj. Base.xcconfig
     // dibikin opsional biar tiap test bisa nyoba skenario belum-diinit-nya.
     // `templated: true` mensimulasikan project yang udah pernah di-init, jadi
     // PRODUCT_BUNDLE_IDENTIFIER-nya udah $(BUNDLE_PREFIX), bukan literal.
+    // `entitlementsAppGroups` nulis Fixture.entitlements dengan array App Group
+    // itu apa adanya — isi sama dua kali buat mensimulasikan entry duplikat.
     @discardableResult
     static func materialize(
         in root: Path,
         withBaseConfig: Bool = true,
-        templated: Bool = false
+        templated: Bool = false,
+        entitlementsAppGroups: [String]? = nil
     ) throws -> Path {
         let projectPath = root + "Fixture.xcodeproj"
         try projectPath.mkpath()
         let value = templated ? bundleIDToken : bundleID
-        try (projectPath + "project.pbxproj").write(pbxproj(bundleIDValue: value))
+        let entitlementsPath = entitlementsAppGroups != nil ? entitlementsFile : nil
+        try (projectPath + "project.pbxproj")
+            .write(pbxproj(bundleIDValue: value, entitlementsPath: entitlementsPath))
 
         if withBaseConfig {
             let configsDir = root + "Configs"
             try configsDir.mkpath()
             try (configsDir + "Base.xcconfig").write("BUNDLE_PREFIX = \(bundleID)\n")
+        }
+
+        if let appGroups = entitlementsAppGroups {
+            try (root + entitlementsFile).write(entitlementsPlist(appGroups: appGroups))
         }
 
         return projectPath

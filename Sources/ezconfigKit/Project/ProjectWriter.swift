@@ -538,43 +538,62 @@ struct ProjectWriter {
     private func rewriteEntitlements(_ plan: AdoptionPlan, into outcome: inout InitOutcome) {
         for p in plan.entitlementPlans.sorted(by: { $0.file.relativePath < $1.file.relativePath }) {
             guard p.hasWork else { continue }
-            
+
             let rel = p.file.relativePath
             let full = sourceRoot + Path(rel)
-            
+
             guard p.file.exists else {
-                outcome.entitlementFailures.append((rel, "file nggak ketemu"))
+                outcome.entitlementFailures.append((rel, "file not found"))
                 continue
             }
             guard p.file.isXML,
                   let original = try? String(contentsOfFile: full.string, encoding: .utf8)
             else {
-                outcome.entitlementFailures.append((rel, "bukan XML plist — edit manual"))
+                outcome.entitlementFailures.append((rel, "not an XML plist, cannot be edited automatically"))
                 continue
             }
-            
-            let groupMap = Dictionary(uniqueKeysWithValues: p.appGroupRewrites.map { ($0.from, $0.to) })
-            let keyMap = Dictionary(uniqueKeysWithValues: p.keychainRewrites.map { ($0.from, $0.to) })
-            
+
+            let groupMap = Dictionary(
+                p.appGroupRewrites.map { ($0.from, $0.to) },
+                uniquingKeysWith: { a, _ in a }
+            )
+            let keyMap = Dictionary(
+                p.keychainRewrites.map { ($0.from, $0.to) },
+                uniquingKeysWith: { a, _ in a }
+            )
+
             var text = original
-            
+
+            // replaced ngitung tiap <string> occurrence, bukan literal unik —
+            // pakai hit set biar report "N value(s)" sama antara dry-run dan
+            // real write meski entitlements-nya punya entry duplikat.
+            var hitGroups: Set<String> = []
             let a = PlistText.replaceArrayStrings(
                 key: EntitlementsReader.appGroupKey, in: text
-            ) { groupMap[$0] }
+            ) { literal in
+                guard let to = groupMap[literal] else { return nil }
+                hitGroups.insert(literal)
+                return to
+            }
             text = a.text
-            
+
+            var hitKeys: Set<String> = []
             let k = PlistText.replaceArrayStrings(
                 key: EntitlementsReader.keychainKey, in: text
-            ) { keyMap[$0] }
+            ) { literal in
+                guard let to = keyMap[literal] else { return nil }
+                hitKeys.insert(literal)
+                return to
+            }
             text = k.text
-            
+
             guard a.replaced + k.replaced > 0, text != original else { continue }
-            
+
             do {
                 try text.write(toFile: full.string, atomically: true, encoding: .utf8)
-                outcome.entitlementEdits.append((rel, a.replaced, k.replaced))
+                outcome.entitlementEdits.append((rel, hitGroups.count, hitKeys.count))
             } catch {
-                outcome.entitlementFailures.append((rel, "gagal ditulis: \(error)"))
+                outcome.entitlementFailures.append((rel, "could not be written: \(error)"))
             }
         }
     }

@@ -354,4 +354,26 @@ struct ProjectWriterDigestGuard {
             #expect(before == after)
         }
     }
+
+    @Test("App Group literal dobel di satu entitlements nggak bikin runInit trap")
+    func runInitHandlesDuplicateAppGroupLiteral() throws {
+        try withTempRoot { root in
+            let literal = "group.com.revan.fixture"
+            let projectPath = try MinimalProject.materialize(
+                in: root,
+                entitlementsAppGroups: [literal, literal]
+            )
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            let outcome = try writer.runInit(overridePrefix: nil, dryRun: false)
+
+            #expect(outcome.entitlementEdits.count == 1)
+            #expect(outcome.entitlementEdits.first?.appGroups == 1)
+            #expect(outcome.entitlementEdits.first?.keychains == 0)
+
+            let entitlements: String = try (root + MinimalProject.entitlementsFile).read()
+            #expect(entitlements.contains("$(APP_GROUP_ID)"))
+            #expect(!entitlements.contains(literal))
+        }
+    }
 }

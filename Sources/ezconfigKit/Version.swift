@@ -8,5 +8,5 @@
 import Foundation
 
 enum EzconfigVersion {
-    static let current = "0.9.0"
+    static let current = "0.9.1"
 }

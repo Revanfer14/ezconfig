@@ -122,7 +122,7 @@ extension Report {
         let width = findings.map(\.key.label.count).max() ?? 0
 
         emit("")
-        emit("  \(findings.count) value(s) contain something shaped like a Team ID")
+        emit("  \(findings.count) value(s) \(verb(findings.count, "contains", "contain")) something shaped like a Team ID")
         for f in findings { emit(findingLine(f, width: width)) }
         emit("")
         emit("    It is not attached to the prefix, so ezconfig cannot tell whether")
@@ -141,7 +141,7 @@ extension Report {
         let emit = emitter(toStdout: toStdout)
         let width = findings.map(\.key.label.count).max() ?? 0
 
-        emit("ezconfig: \(findings.count) value(s) in \(projectName) belong to a target")
+        emit("ezconfig: \(findings.count) value(s) in \(projectName) \(verb(findings.count, "belongs", "belong")) to a target")
         emit("that is not linked to Configs/Base.xcconfig.")
         emit("")
         for f in findings { emit(findingLine(f, width: width)) }
@@ -194,8 +194,10 @@ extension Report {
         let emit = emitter(toStdout: toStdout)
         let width = audit.dangling.map(\.target.count).max() ?? 0
 
-        emit("ezconfig: \(audit.dangling.count) build configuration(s) use $(BUNDLE_PREFIX)")
-        emit("but are not linked to Configs/Base.xcconfig.")
+        let danglingVerb = verb(audit.dangling.count, "uses", "use")
+        let danglingBe = verb(audit.dangling.count, "is", "are")
+        emit("ezconfig: \(audit.dangling.count) build configuration(s) \(danglingVerb) $(BUNDLE_PREFIX)")
+        emit("but \(danglingBe) not linked to Configs/Base.xcconfig.")
         emit("")
         for d in audit.dangling {
             emit("    \(padRight(d.target, width))  \(padRight(d.config, 8))  \(d.value)")

@@ -21,7 +21,7 @@ enum Report {
         let others = info.targets.filter { !$0.isSignable }
         
         if signable.isEmpty {
-            out("  No target have PRODUCT_BUNDLE_IDENTIFIER.")
+            out("  No target has PRODUCT_BUNDLE_IDENTIFIER.")
         }
         
         for target in signable {
@@ -54,7 +54,7 @@ enum Report {
         if findings.isEmpty {
             out(" Clean. No signing identity is missing in .pbxproj.")
         } else {
-            out("  \(findings.count) literal value found in .pbxproj:")
+            out("  \(findings.count) literal \(plural(findings.count, "value")) found in .pbxproj:")
             for f in findings {
                 out("    \(f.target) / \(f.config)  \(f.key) = \(f.value)")
             }
@@ -67,7 +67,7 @@ enum Report {
     private static func describe(_ v: SettingValue?, key: String) -> String {
         guard let v else { return "\(pad(key, 10)) —" }
         let mark = v.isVariable ? "✓" : "!"
-        let origin = v.source == .project ? "  (dari project)" : ""
+        let origin = v.source == .project ? "  (from project)" : ""
         return "\(pad(key, 10)) \(mark) \(v.value)\(origin)"
     }
     
@@ -77,8 +77,12 @@ enum Report {
     
     static let rule = String(repeating: "─", count: 52)
     
-    private static func plural(_ n: Int, _ word: String) -> String {
+    static func plural(_ n: Int, _ word: String) -> String {
         n == 1 ? word : word + "s"
+    }
+
+    static func verb(_ n: Int, _ singular: String, _ plural: String) -> String {
+        n == 1 ? singular : plural
     }
     
     static func stripSummary(_ o: StripOutcome) -> String? {
@@ -281,7 +285,8 @@ enum Report {
         
         if !standaloneSkips.isEmpty {
             var lines = [
-                "\(standaloneSkips.count) \(plural(standaloneSkips.count, "target")) is not managed by ezconfig",
+                "\(standaloneSkips.count) \(plural(standaloneSkips.count, "target")) "
+                    + "\(verb(standaloneSkips.count, "is", "are")) not managed by ezconfig",
                 "",
             ]
             for s in standaloneSkips {
