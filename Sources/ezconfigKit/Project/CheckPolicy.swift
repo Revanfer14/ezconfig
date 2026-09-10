@@ -22,6 +22,7 @@ enum CheckPolicy {
         var unfixable: Set<String> = []       // suffix nggak dikenal, ezconfig nolak nebak
         var unlinked: Set<String> = []        // target belum nunjuk Base.xcconfig
         var drift: Set<String> = []           // anchor keluar dari prefix sendiri
+        var unrepairable: Set<String> = []    // nggak ada anchor, nggak ada template buat companion
         var driftContext: DriftContext?
     }
 
@@ -70,7 +71,7 @@ enum CheckPolicy {
         }
         
         for c in plan.unresolvedCompanions {
-            out.outsidePrefix.insert(c.from)
+            out.unrepairable.insert(c.from)
         }
         
         for s in plan.suspicious {

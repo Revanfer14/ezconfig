@@ -404,3 +404,102 @@ struct InitCommandGitGuard {
         }
     }
 }
+
+@Suite("WKCompanionAppBundleIdentifier derivation")
+struct CompanionDerivation {
+
+    private func config(
+        name: String,
+        bundleID: String,
+        companion: String? = nil
+    ) -> ConfigInfo {
+        ConfigInfo(
+            name: name,
+            bundleID: SettingValue(value: bundleID, source: .target),
+            team: nil,
+            baseConfigFile: "Base.xcconfig",
+            sdkroot: "iphoneos",
+            entitlements: nil,
+            companionBundleID: companion.map { SettingValue(value: $0, source: .target) },
+            infoPlistFile: nil,
+            generatesInfoPlist: true
+        )
+    }
+
+    private func plan(companion: String?) throws -> AdoptionPlan {
+        let appConfigs = [
+            config(name: "Debug", bundleID: prefix),
+            config(name: "Release", bundleID: prefix),
+        ]
+        let watchConfigs = [
+            config(name: "Debug", bundleID: "\(prefix).watch", companion: companion),
+            config(name: "Release", bundleID: "\(prefix).watch", companion: companion),
+        ]
+        let info = ProjectInfo(
+            path: "/tmp/Companion.xcodeproj",
+            name: "Companion",
+            targets: [
+                TargetInfo(
+                    name: "App", productType: "app",
+                    rawProductType: "com.apple.product-type.application",
+                    platform: .iOS, attributeTeam: nil, configs: appConfigs
+                ),
+                TargetInfo(
+                    name: "Watch", productType: "app",
+                    rawProductType: "com.apple.product-type.application",
+                    platform: .watchOS, attributeTeam: nil, configs: watchConfigs
+                ),
+            ]
+        )
+        return try AdoptionPlan.make(info: info, overridePrefix: prefix)
+    }
+
+    @Test("stale literal shorter than the prefix gets the anchor's template")
+    func staleShorterLiteral() throws {
+        let p = try plan(companion: "com.x")
+        let c = try #require(p.companions.first { $0.target == "Watch" })
+        #expect(c.to == token)
+    }
+
+    @Test("literal already equal to the prefix still gets the anchor's template")
+    func literalEqualToPrefix() throws {
+        let p = try plan(companion: prefix)
+        let c = try #require(p.companions.first { $0.target == "Watch" })
+        #expect(c.to == token)
+    }
+
+    @Test("value already in adopted variable form is left alone, no double substitution")
+    func alreadyAdoptedVariable() throws {
+        let p = try plan(companion: token)
+        #expect(!p.companions.contains { $0.target == "Watch" })
+    }
+
+    @Test("companion key absent stays absent")
+    func keyAbsent() throws {
+        let p = try plan(companion: nil)
+        #expect(!p.companions.contains { $0.target == "Watch" })
+        #expect(p.companionSettings(for: "Watch").isEmpty)
+    }
+
+    @Test("both configurations of the watch target receive the companion value")
+    func writesBothConfigurations() throws {
+        try withTempRoot { root in
+            let projectPath = try WatchProject.materialize(
+                in: root, companionValue: WatchProject.staleCompanion
+            )
+            let writer = try ProjectWriter(projectPath: projectPath)
+
+            let outcome = try writer.runInit(overridePrefix: nil, dryRun: false)
+            #expect(outcome.strip.companionsRewritten == 2)
+
+            let text: String = try (projectPath + "project.pbxproj").read()
+            let occurrences = text.components(
+                separatedBy: "INFOPLIST_KEY_WKCompanionAppBundleIdentifier = \"$(BUNDLE_PREFIX)\""
+            ).count - 1
+            #expect(occurrences == 2)
+            #expect(!text.contains(
+                "INFOPLIST_KEY_WKCompanionAppBundleIdentifier = \"\(WatchProject.staleCompanion)\""
+            ))
+        }
+    }
+}

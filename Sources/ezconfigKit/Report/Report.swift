@@ -264,14 +264,18 @@ enum Report {
         let watchSkips = o.skipped.filter { $0.kind == .watchOutsidePrefix }
         for w in watchSkips {
             attention.append([
-                "Watch app bundle ID does not match its parent app",
+                "\(w.target) will fail to install on a device",
                 "",
-                "\(w.target)   \(w.bundleID ?? "?")",
-                "should start with   \(o.canonicalPrefix)",
+                "  bundle ID   \(w.bundleID ?? "?")",
+                "  needs to start with   \(o.canonicalPrefix)",
                 "",
-                "In Xcode, select that target and set both:",
+                "Apple requires an embedded watch app's bundle ID to be prefixed by",
+                "its companion app's. This one is not, so the installer refuses it.",
+                "WKCompanionAppBundleIdentifier, if present, is kept pointed at",
+                "\(o.canonicalPrefix) automatically — this is the only thing left to fix.",
+                "",
+                "In Xcode, select \(w.target) and set:",
                 "  Signing & Capabilities  >  Bundle Identifier",
-                "  Build Settings          >  WKCompanionAppBundleIdentifier",
                 "",
                 "Then run: ezconfig init",
             ])
@@ -339,15 +343,28 @@ enum Report {
         }
         
         for c in o.companionUnresolved {
-            attention.append([
-                "Companion reference left as is",
-                "",
-                "\(c.target) / \(c.site)",
-                "  \(c.from)",
-                "",
-                "It is outside \(o.canonicalPrefix), so ezconfig cannot derive it.",
-                "Fix it in Xcode if it should point at this app.",
-            ])
+            if c.site == "build setting" {
+                attention.append([
+                    "\(c.target) will fail to install on a device",
+                    "",
+                    "  WKCompanionAppBundleIdentifier   \(c.from)",
+                    "",
+                    "This project has no single anchor app target, so ezconfig has no",
+                    "bundle ID to copy into this reference.",
+                    "",
+                    "Fix it in Xcode, or run: ezconfig init --prefix <id>",
+                ])
+            } else {
+                attention.append([
+                    "\(c.target) will fail to install on a device",
+                    "",
+                    "\(c.site)",
+                    "  \(c.from)",
+                    "",
+                    "It is outside \(o.canonicalPrefix), so ezconfig cannot derive it.",
+                    "Fix it in Xcode if it should point at this app.",
+                ])
+            }
         }
         
         for p in o.plistFailures {

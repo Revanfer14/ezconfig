@@ -381,26 +381,38 @@ struct AdoptionPlan {
         }
         
         // 4. Companion reference.
+        // WKCompanionAppBundleIdentifier must equal the anchor's own bundle ID
+        // exactly, so the anchor's template is the source of truth — never the
+        // watch target's own stale value. nil when there is no single anchor.
+        let anchorTemplate: String? = anchorName
+            .flatMap { name in entries.first { $0.target.name == name } }
+            .flatMap { entry -> String? in
+                switch entry.decision {
+                case .anchor, .adopt: return entry.template
+                case .alreadyAdopted: return entry.currentBundleID
+                case .skip:           return nil
+                }
+            }
+
         var companions: [CompanionPlan] = []
         var plistInfos: [InfoPlistInfo] = []
-        
+
         for target in info.targets {
             for raw in target.companionValues {
-                guard let c = companionPlan(
-                    target: target.name, site: .buildSetting,
-                    key: "WKCompanionAppBundleIdentifier", raw: raw,
-                    prefix: prefix, anchors: anchors, suffixes: knownSuffixes,
-                    cleanings: &cleanings, suspicious: &suspicious
+                guard let c = companionSettingPlan(
+                    target: target.name, raw: raw,
+                    prefix: prefix, anchorTemplate: anchorTemplate,
+                    suffixes: knownSuffixes, cleanings: &cleanings
                 ) else { continue }
                 companions.append(c)
             }
-            
+
             guard let rel = target.legacyInfoPlist else { continue }
             let plist = InfoPlistReader.read(rel, sourceRoot: sourceRoot)
             plistInfos.append(plist)
-            
+
             for entry in plist.companions {
-                guard let c = companionPlan(
+                guard let c = companionPlistPlan(
                     target: target.name, site: .plistFile(rel),
                     key: entry.key, raw: entry.value,
                     prefix: prefix, anchors: anchors, suffixes: knownSuffixes,
@@ -453,7 +465,44 @@ extension AdoptionPlan {
     }
 }
 
-private func companionPlan(
+// WKCompanionAppBundleIdentifier: the anchor's template is the source of
+// truth, so a present key is overwritten unconditionally, whatever its
+// current value — stale, correct, literal, or already in variable form.
+// No anchor (ambiguous or missing app target) falls back to the old
+// prefix-derived behaviour so the unresolved-reporting path still fires.
+private func companionSettingPlan(
+    target: String,
+    raw: String,
+    prefix: String,
+    anchorTemplate: String?,
+    suffixes: Set<String>,
+    cleanings: inout [SuffixCleaning]
+) -> CompanionPlan? {
+    let key = "WKCompanionAppBundleIdentifier"
+    let anchors = [prefix, AdoptionPlan.token]
+    let c = SuffixCleaner.clean(raw, anchors: anchors, suffixes: suffixes)
+
+    if let removed = c.removed {
+        cleanings.append(
+            SuffixCleaning(
+                target: target, site: "companion",
+                from: raw, to: anchorTemplate ?? c.value,
+                suffix: removed
+            )
+        )
+    }
+
+    guard let anchorTemplate else {
+        let isLiteral = !raw.contains("$(") && !raw.contains("${")
+        guard c.didClean || isLiteral else { return nil }
+        return CompanionPlan(target: target, site: .buildSetting, key: key, from: raw, to: nil)
+    }
+
+    guard raw != anchorTemplate else { return nil }
+    return CompanionPlan(target: target, site: .buildSetting, key: key, from: raw, to: anchorTemplate)
+}
+
+private func companionPlistPlan(
     target: String,
     site: CompanionPlan.Site,
     key: String,
@@ -464,10 +513,10 @@ private func companionPlan(
     cleanings: inout [SuffixCleaning],
     suspicious: inout [SuspiciousSuffix]
 ) -> CompanionPlan? {
-    
+
     let c = SuffixCleaner.clean(raw, anchors: anchors, suffixes: suffixes)
     let to = AdoptionPlan.derive(c.value, prefix: prefix)
-    
+
     if let to, let s = SuffixCleaner.suspiciousComponent(
         in: String(to.dropFirst(AdoptionPlan.token.count))
     ) {
@@ -478,10 +527,10 @@ private func companionPlan(
             )
         )
     }
-    
+
     let isLiteral = !raw.contains("$(") && !raw.contains("${")
     guard c.didClean || isLiteral else { return nil }
-    
+
     if let removed = c.removed {
         cleanings.append(
             SuffixCleaning(
@@ -491,7 +540,7 @@ private func companionPlan(
             )
         )
     }
-    
+
     return CompanionPlan(target: target, site: site, key: key, from: raw, to: to)
 }
 

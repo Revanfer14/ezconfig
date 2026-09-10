@@ -216,7 +216,11 @@ extension Ezconfig {
                 allowlist: allow
             )
             guard residue.blocking.isEmpty else {
-                Report.printFixFailed(residue.blocking, projectName: ctx.projectName)
+                if residue.blocking.allSatisfy({ allow.unrepairable.contains($0.value) }) {
+                    Report.printUnrepairable(residue.blocking, projectName: ctx.projectName)
+                } else {
+                    Report.printFixFailed(residue.blocking, projectName: ctx.projectName)
+                }
                 throw ExitCode.failure
             }
             

@@ -97,6 +97,21 @@ extension Report {
         emit("")
     }
 
+    static func printUnrepairable(_ residue: [Finding], projectName: String) {
+        let emit = emitter(toStdout: false)
+        let width = residue.map(\.key.label.count).max() ?? 0
+
+        emit("ezconfig: \(residue.count) value(s) in \(projectName) cannot be repaired automatically.")
+        emit("")
+        for f in residue { emit(findingLine(f, width: width)) }
+        emit("")
+        emit("  This project has no single anchor app target, so there is no bundle ID")
+        emit("  template to copy a companion reference from.")
+        emit("")
+        emit("  Fix it in Xcode, or run: ezconfig init --prefix <id>")
+        emit("")
+    }
+
     static func printTolerated(_ findings: [Finding], toStdout: Bool) {
         guard !findings.isEmpty else { return }
         let emit = emitter(toStdout: toStdout)
