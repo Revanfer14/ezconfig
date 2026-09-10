@@ -1,6 +1,6 @@
 # ezconfig
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue)](https://github.com/Revanfer14/ezconfig/releases)
+[![Version](https://img.shields.io/badge/version-1.0.1-blue)](https://github.com/Revanfer14/ezconfig/releases)
 [![Swift](https://img.shields.io/badge/swift-6.3-orange)](https://swift.org)
 [![Platform](https://img.shields.io/badge/platform-macOS%2013%2B-lightgrey)](https://www.apple.com/macos/)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
