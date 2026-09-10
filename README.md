@@ -191,6 +191,24 @@ swift test                                   # run the test suite
 Built with [swift-argument-parser](https://github.com/apple/swift-argument-parser)
 and [XcodeProj](https://github.com/tuist/XcodeProj).
 
+## Alternatives
+
+`ezconfig` only retrofits signing identity onto an existing `.xcodeproj`. If
+what you actually need is full project generation from a manifest, these are
+great options:
+
+- [XcodeGen](https://github.com/yonaskolb/XcodeGen)
+- [Tuist](https://github.com/tuist/tuist)
+- [Xcake](https://github.com/jcavar/xcake)
+
+## Attributions
+
+This tool is powered by:
+
+- [XcodeProj](https://github.com/tuist/XcodeProj)
+- [swift-argument-parser](https://github.com/apple/swift-argument-parser)
+- [PathKit](https://github.com/kylef/PathKit)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
